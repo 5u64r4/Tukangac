@@ -1,0 +1,6 @@
+{
+  "name": "Tukang AC Online",
+  "description": "Aplikasi pemesanan dan manajemen layanan service AC profesional dengan estimasi transparan dan teknisi terdekat.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
