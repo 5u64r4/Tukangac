@@ -20,17 +20,18 @@ interface NavbarProps {
   onRoleChange: (role: UserRole) => void;
   onOpenWhatsApp: () => void;
   onOpenDatabaseInspector: () => void;
+  isDemoMode?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentRole,
   onRoleChange,
   onOpenWhatsApp,
-  onOpenDatabaseInspector
+  onOpenDatabaseInspector,
+  isDemoMode = true
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -75,6 +76,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   ];
 
   const currentRoleObj = roles.find(r => r.id === currentRole) || roles[0];
+  const isAdmin = currentRole === 'admin';
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-md shadow-slate-900/6">
@@ -103,18 +105,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Center / Right: Current Role Badge, Database Inspector & 3-Line Menu */}
+        {/* Center / Right: Current Role Badge, Database Inspector (Admin Only) & 3-Line Menu */}
         <div className="flex items-center gap-2 sm:gap-3 relative" ref={menuRef}>
-          {/* Quick Database Inspector Button */}
-          <button
-            onClick={onOpenDatabaseInspector}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-900 text-sky-400 hover:bg-slate-800 font-bold text-xs border border-slate-700 shadow-xs transition-colors cursor-pointer"
-            title="Buka Database Backend (Customer, Admin, Teknisi)"
-          >
-            <Database className="w-3.5 h-3.5 text-sky-400 animate-pulse" />
-            <span className="hidden sm:inline">Database Cloud</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-400/30">3 Role</span>
-          </button>
+          {/* Quick Database Inspector Button: RESTRICTED TO ADMIN ONLY */}
+          {isAdmin && (
+            <button
+              onClick={onOpenDatabaseInspector}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-900 text-sky-400 hover:bg-slate-800 font-bold text-xs border border-slate-700 shadow-xs transition-colors cursor-pointer"
+              title="Buka Database Supabase (Admin Only)"
+            >
+              <Database className="w-3.5 h-3.5 text-sky-400 animate-pulse" />
+              <span className="hidden sm:inline">Supabase DB</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-400/30">Admin</span>
+            </button>
+          )}
 
           {/* Quick WA button for desktop */}
           <button
@@ -129,6 +133,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="hidden xs:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200 text-slate-600 text-xs font-semibold">
             <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span>
             <span className="capitalize font-bold text-slate-800">{currentRoleObj.label}</span>
+            {isDemoMode && (
+              <span className="text-[9px] px-1 rounded bg-amber-100 text-amber-800 font-medium">Demo</span>
+            )}
           </div>
 
           {/* 3-Line (Hamburger) Menu Button */}
@@ -162,31 +169,33 @@ export const Navbar: React.FC<NavbarProps> = ({
                 transition={{ duration: 0.18, ease: 'easeOut' }}
                 className="absolute right-0 top-13 sm:top-14 w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-slate-200/90 p-3.5 z-50 overflow-hidden"
               >
-                {/* Database Quick Access in Dropdown */}
-                <div className="mb-2.5 p-2.5 rounded-xl bg-slate-900 text-white border border-slate-800">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-1.5 text-xs font-black text-sky-400">
-                      <Database className="w-3.5 h-3.5" />
-                      <span>Database Firestore</span>
+                {/* Database Quick Access: RESTRICTED TO ADMIN ONLY (FASE 15) */}
+                {isAdmin && (
+                  <div className="mb-2.5 p-2.5 rounded-xl bg-slate-900 text-white border border-slate-800">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-1.5 text-xs font-black text-sky-400">
+                        <Database className="w-3.5 h-3.5" />
+                        <span>Supabase Database & Realtime</span>
+                      </div>
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        Admin Only
+                      </span>
                     </div>
-                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      Terpisah 3 Role
-                    </span>
+                    <p className="text-[11px] text-slate-300 mb-2 leading-tight">
+                      Pemeriksaan data live: Profiles, Orders, Teknisi, & Realtime
+                    </p>
+                    <button
+                      onClick={() => {
+                        onOpenDatabaseInspector();
+                        setIsMenuOpen(false);
+                      }}
+                      className="w-full py-1.5 px-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Database className="w-3 h-3" />
+                      <span>Buka Supabase Explorer</span>
+                    </button>
                   </div>
-                  <p className="text-[11px] text-slate-300 mb-2 leading-tight">
-                    Pemeriksaan data live: 1. Customer, 2. Admin, 3. Teknisi
-                  </p>
-                  <button
-                    onClick={() => {
-                      onOpenDatabaseInspector();
-                      setIsMenuOpen(false);
-                    }}
-                    className="w-full py-1.5 px-2.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Database className="w-3 h-3" />
-                    <span>Buka Database Explorer</span>
-                  </button>
-                </div>
+                )}
 
                 {/* Header info */}
                 <div className="px-2 pb-2.5 mb-2 border-b border-slate-100 flex items-center justify-between">
@@ -195,13 +204,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <Sparkles className="w-3.5 h-3.5 text-sky-600" />
                       Pilih Mode Tampilan
                     </h4>
-                    <p className="text-[11px] text-slate-400">Ganti tampilan peran pengguna</p>
+                    <p className="text-[11px] text-slate-400">
+                      {isDemoMode ? 'Preview Role (Mode Demo)' : 'Peran Pengguna Terautentikasi'}
+                    </p>
                   </div>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
                     3 Role
                   </span>
                 </div>
-
 
                 {/* Role Switch Options */}
                 <div className="space-y-1.5">
@@ -278,4 +288,3 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
-

@@ -1,17 +1,8 @@
-import { 
-  collection, 
-  doc, 
-  getDocs, 
-  setDoc, 
-  onSnapshot, 
-  query, 
-  orderBy,
-  writeBatch
-} from 'firebase/firestore';
-import db from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { OrderChatMessage, ChatSenderRole } from '../types';
 import { logAuditEvent } from './adminService';
-import { sanitizeFirestoreData } from '../lib/firebaseUtils';
+
+const MESSAGES_TABLE = 'order_messages';
 
 // Default canned responses / quick replies
 export const CUSTOMER_QUICK_REPLIES = [
@@ -37,52 +28,78 @@ export function formatChatTime(date: Date = new Date()): string {
   return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }).replace('.', ':');
 }
 
+function mapMessageRow(row: any, defaultOrderId: string): OrderChatMessage {
+  return {
+    id: row.id,
+    orderId: row.order_id || row.orderId || defaultOrderId,
+    senderRole: (row.sender_role || row.senderRole || 'customer') as ChatSenderRole,
+    senderName: row.sender_name || row.senderName || 'Pengguna',
+    senderAvatar: row.sender_avatar || row.senderAvatar,
+    text: row.message || row.text || '',
+    timestamp: row.timestamp || formatChatTime(),
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    isRead: row.is_read ?? row.isRead ?? true
+  };
+}
+
 /**
- * Real-time listener for order messages in Firestore
+ * Fetch all messages for a specific order
+ */
+export async function getOrderMessages(orderId: string): Promise<OrderChatMessage[]> {
+  try {
+    const { data, error } = await supabase
+      .from(MESSAGES_TABLE)
+      .select('*')
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.warn(`Error fetching messages for order ${orderId}:`, error);
+      return [];
+    }
+
+    return (data || []).map(row => mapMessageRow(row, orderId));
+  } catch (err) {
+    console.error(`Error fetching order messages:`, err);
+    return [];
+  }
+}
+
+/**
+ * Real-time listener for order messages via Supabase Realtime
  */
 export function subscribeOrderMessages(
   orderId: string, 
   callback: (messages: OrderChatMessage[]) => void
 ): () => void {
-  try {
-    const messagesCol = collection(db, 'orders', orderId, 'messages');
-    
-    return onSnapshot(messagesCol, (snapshot) => {
-      if (!snapshot.empty) {
-        const msgs: OrderChatMessage[] = snapshot.docs.map(docSnap => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            orderId: data.orderId || orderId,
-            senderRole: (data.senderRole || 'customer') as ChatSenderRole,
-            senderName: data.senderName || 'Pengguna',
-            senderAvatar: data.senderAvatar,
-            text: data.text || '',
-            timestamp: data.timestamp || formatChatTime(),
-            createdAt: data.createdAt || new Date().toISOString(),
-            isRead: data.isRead ?? true
-          };
-        });
+  // 1. Initial query
+  getOrderMessages(orderId).then(callback);
 
-        // Sort by createdAt ascending (oldest to newest)
-        msgs.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-        callback(msgs);
-      } else {
-        callback([]);
+  // 2. Realtime channel subscription with auto-cleanup on unmount
+  const channel = supabase
+    .channel(`order_chat_${orderId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: MESSAGES_TABLE,
+        filter: `order_id=eq.${orderId}`
+      },
+      () => {
+        // Refetch latest sorted messages
+        getOrderMessages(orderId).then(callback);
       }
-    }, (error) => {
-      console.warn(`[Firestore] Order ${orderId} chat snapshot warning:`, error);
-      callback([]);
-    });
-  } catch (err) {
-    console.error(`Error subscribing to order ${orderId} messages:`, err);
-    callback([]);
-    return () => {};
-  }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel ? supabase.removeChannel(channel) : channel.unsubscribe();
+  };
 }
 
 /**
- * Send a chat message to Firestore under /orders/{orderId}/messages/{messageId}
+ * Send a chat message to Supabase order_messages table
  */
 export async function sendOrderMessage(
   orderId: string,
@@ -111,8 +128,25 @@ export async function sendOrderMessage(
   };
 
   try {
-    const msgRef = doc(db, 'orders', orderId, 'messages', messageId);
-    await setDoc(msgRef, sanitizeFirestoreData(newMessage));
+    const rowPayload = {
+      id: messageId,
+      order_id: orderId,
+      sender_role: payload.senderRole,
+      sender_name: payload.senderName,
+      sender_avatar: payload.senderAvatar || null,
+      message: payload.text.trim(),
+      timestamp,
+      is_read: false,
+      created_at: createdAt
+    };
+
+    const { error } = await supabase
+      .from(MESSAGES_TABLE)
+      .insert(rowPayload);
+
+    if (error) {
+      throw error;
+    }
 
     // Optional audit log for tracing
     logAuditEvent(
@@ -138,53 +172,45 @@ export async function seedInitialOrderChatIfEmpty(
   technicianName: string = 'Andi Pratama'
 ): Promise<void> {
   try {
-    const messagesCol = collection(db, 'orders', orderId, 'messages');
-    const snap = await getDocs(messagesCol);
-    if (!snap.empty) return;
+    const existing = await getOrderMessages(orderId);
+    if (existing.length > 0) return;
 
-    const batch = writeBatch(db);
     const now = Date.now();
-
-    const sampleMessages: OrderChatMessage[] = [
+    const sampleMessages = [
       {
         id: `msg_sys_${now - 300000}`,
-        orderId,
-        senderRole: 'system',
-        senderName: 'Sistem Tukang AC Online',
-        text: `Pesanan #${orderId} telah terkonfirmasi. Teknisi ${technicianName} telah ditugaskan. Fitur chat terenkripsi aktif untuk koordinasi.`,
+        order_id: orderId,
+        sender_role: 'system',
+        sender_name: 'Sistem Tukang AC Online',
+        message: `Pesanan #${orderId} telah terkonfirmasi. Teknisi ${technicianName} telah ditugaskan. Fitur chat terenkripsi aktif untuk koordinasi.`,
         timestamp: formatChatTime(new Date(now - 300000)),
-        createdAt: new Date(now - 300000).toISOString(),
-        isRead: true
+        is_read: true,
+        created_at: new Date(now - 300000).toISOString()
       },
       {
         id: `msg_tech_${now - 180000}`,
-        orderId,
-        senderRole: 'technician',
-        senderName: technicianName,
-        senderAvatar: 'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?auto=format&fit=crop&w=320&q=80',
-        text: `Halo Pak/Bu ${customerName}, saya ${technicianName} dari Tukang AC Online. Saya sedang dalam perjalanan menuju lokasi Anda (est. 10-15 menit).`,
+        order_id: orderId,
+        sender_role: 'technician',
+        sender_name: technicianName,
+        sender_avatar: 'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?auto=format&fit=crop&w=320&q=80',
+        message: `Halo Pak/Bu ${customerName}, saya ${technicianName} dari Tukang AC Online. Saya sedang dalam perjalanan menuju lokasi Anda (est. 10-15 menit).`,
         timestamp: formatChatTime(new Date(now - 180000)),
-        createdAt: new Date(now - 180000).toISOString(),
-        isRead: true
+        is_read: true,
+        created_at: new Date(now - 180000).toISOString()
       },
       {
         id: `msg_cust_${now - 120000}`,
-        orderId,
-        senderRole: 'customer',
-        senderName: customerName,
-        text: `Halo Mas ${technicianName}, baik ditunggu ya. Rumah saya pagar warna hitam no 12 samping pos satpam.`,
+        order_id: orderId,
+        sender_role: 'customer',
+        sender_name: customerName,
+        message: `Halo Mas ${technicianName}, baik ditunggu ya. Rumah saya pagar warna hitam no 12 samping pos satpam.`,
         timestamp: formatChatTime(new Date(now - 120000)),
-        createdAt: new Date(now - 120000).toISOString(),
-        isRead: true
+        is_read: true,
+        created_at: new Date(now - 120000).toISOString()
       }
     ];
 
-    for (const msg of sampleMessages) {
-      const msgRef = doc(db, 'orders', orderId, 'messages', msg.id);
-      batch.set(msgRef, sanitizeFirestoreData(msg));
-    }
-
-    await batch.commit();
+    await supabase.from(MESSAGES_TABLE).insert(sampleMessages);
   } catch (err) {
     console.warn(`Could not seed initial chat for order ${orderId}:`, err);
   }

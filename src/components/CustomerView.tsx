@@ -214,9 +214,9 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
       target.midtransVaNumber = updatePayload.midtransVaNumber;
     }
 
-    // Persist payment record to Cloud Firestore
+    // Persist payment record to Supabase
     updateOrderPayment(orderId, updatePayload).catch(err => {
-      console.warn('Could not persist payment status update to Firestore:', err);
+      console.warn('Could not persist payment status update to Supabase:', err);
     });
 
     logAuditEvent('PAYMENT_SETTLEMENT', 'customer', `Order: #${orderId}`, `Pembayaran Midtrans berhasil: ${updatePayload.paymentChannel?.toUpperCase()} (Rp${target?.totalPrice.toLocaleString('id-ID') || '0'})`).catch(() => {});
@@ -1652,7 +1652,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             </div>
           </div>
 
-          {/* Interactive Live Chat with Technician (Firebase Firestore) */}
+          {/* Interactive Live Chat with Technician (Supabase Realtime) */}
           <InlineOrderChat
             order={activeOrder}
             currentRole="customer"

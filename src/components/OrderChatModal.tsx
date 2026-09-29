@@ -60,7 +60,7 @@ export const OrderChatModal: React.FC<OrderChatModalProps> = ({
     ? null
     : 'https://images.unsplash.com/photo-1540569014015-19a7be504e3a?auto=format&fit=crop&w=320&q=80';
 
-  // Seed default chat and subscribe to Firestore updates
+  // Seed default chat and subscribe to Supabase updates
   useEffect(() => {
     if (!isOpen || !order?.id) return;
 
@@ -73,7 +73,7 @@ export const OrderChatModal: React.FC<OrderChatModalProps> = ({
       order.technicianName || 'Andi Pratama'
     );
 
-    // Subscribe to real-time Firestore message stream
+    // Subscribe to real-time Supabase message stream
     const unsubscribe = subscribeOrderMessages(order.id, (liveMessages) => {
       if (!isMounted) return;
       setMessages(liveMessages);
@@ -192,7 +192,7 @@ export const OrderChatModal: React.FC<OrderChatModalProps> = ({
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                <span>Firestore Live</span>
+                <span>Supabase Realtime</span>
               </span>
 
               <button
@@ -224,7 +224,7 @@ export const OrderChatModal: React.FC<OrderChatModalProps> = ({
             <div className="text-center my-2">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-200/70 border border-slate-300/60 text-[10px] font-bold text-slate-600 shadow-2xs">
                 <ShieldCheck className="w-3 h-3 text-sky-600" />
-                <span>Chat Terenkripsi & Terhubung Langsung ke Firestore Realtime</span>
+                <span>Chat Terenkripsi & Terhubung Langsung ke Supabase Realtime</span>
               </div>
             </div>
 

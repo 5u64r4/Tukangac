@@ -14,9 +14,11 @@ import { createBookingOrder } from './services/customerService';
 import { updateAdminOrderStatus, subscribeAdminOrders, logAuditEvent } from './services/adminService';
 import { updateTechnicianOrderStatus, subscribeTechnicians } from './services/technicianService';
 import { subscribeArticles, getAllArticles } from './services/articleService';
+import { getCurrentUserProfile, onAuthStateChange, UserProfile } from './services/authService';
 
 export default function App() {
   const [currentRole, setCurrentRole] = useState<UserRole>('customer');
+  const [authenticatedProfile, setAuthenticatedProfile] = useState<UserProfile | null>(null);
   const [customerTab, setCustomerTab] = useState<CustomerTab>('home');
   const [technicianTab, setTechnicianTab] = useState<TechnicianTab>('beranda');
   const [adminTab, setAdminTab] = useState<AdminTab>('orders');
@@ -26,38 +28,59 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDatabaseInspectorOpen, setIsDatabaseInspectorOpen] = useState(false);
 
-  // Initialize and synchronize Firebase Firestore on startup
+  // Development/Demo Mode Flag:
+  // When an authenticated user is logged in, their role comes directly from profiles.role
+  const isDemoMode = !authenticatedProfile;
+
+  // Initialize and synchronize Supabase Realtime backend on startup
   useEffect(() => {
     let unsubscribeOrders: (() => void) | null = null;
     let unsubscribeTechs: (() => void) | null = null;
     let unsubscribeArticles: (() => void) | null = null;
+    let unsubscribeAuth: (() => void) | null = null;
 
     const setupBackendDatabase = async () => {
       try {
+        // Initial auth check
+        const profile = await getCurrentUserProfile();
+        if (profile) {
+          setAuthenticatedProfile(profile);
+          setCurrentRole(profile.role);
+        }
+
+        // Listen for Supabase Auth state changes
+        unsubscribeAuth = onAuthStateChange((updatedProfile) => {
+          setAuthenticatedProfile(updatedProfile);
+          if (updatedProfile) {
+            setCurrentRole(updatedProfile.role);
+          }
+        });
+
+        // Initialize Supabase tables if empty
         await initializeDatabaseIfEmpty();
 
-        // Subscribe to real-time orders collection
+        // Subscribe to real-time orders via Supabase Realtime
         unsubscribeOrders = subscribeAdminOrders((liveOrders) => {
           if (liveOrders && liveOrders.length > 0) {
             setOrders(liveOrders);
           }
         });
 
-        // Subscribe to real-time technicians collection
+        // Subscribe to real-time technicians via Supabase Realtime
         unsubscribeTechs = subscribeTechnicians((liveTechs) => {
           if (liveTechs && liveTechs.length > 0) {
             setTechnicians(liveTechs);
           }
         });
 
-        // Subscribe to real-time articles collection
+        // Subscribe to real-time articles via Supabase Realtime
         unsubscribeArticles = subscribeArticles((liveArticles) => {
           if (liveArticles && liveArticles.length > 0) {
             setArticles(liveArticles);
           }
         });
       } catch (err) {
-        console.warn('Firebase initialization notice:', err);
+        console.warn('Supabase initialization notice:', err);
       }
     };
 
@@ -67,6 +90,7 @@ export default function App() {
       if (unsubscribeOrders) unsubscribeOrders();
       if (unsubscribeTechs) unsubscribeTechs();
       if (unsubscribeArticles) unsubscribeArticles();
+      if (unsubscribeAuth) unsubscribeAuth();
     };
   }, []);
 
@@ -79,11 +103,23 @@ export default function App() {
     }
   };
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
+  // Defensive showToast: never displays undefined, null, or corrupted string templates
+  const showToast = (msg: unknown) => {
+    if (!msg || typeof msg !== 'string') return;
+    const clean = msg.trim();
+    if (
+      !clean ||
+      clean.includes('undefined') ||
+      clean.includes('null') ||
+      clean.includes('[object Object]')
+    ) {
+      return;
+    }
+
+    setToastMessage(clean);
     setTimeout(() => {
-      setToastMessage((prev) => (prev === msg ? null : prev));
-    }, 3000);
+      setToastMessage((prev) => (prev === clean ? null : prev));
+    }, 3200);
   };
 
   const handleAddNewOrder = async (newOrderData: Partial<Order>) => {
@@ -111,12 +147,12 @@ export default function App() {
     // Optimistic UI update
     setOrders((prev) => [fullOrder, ...prev]);
 
-    // Persist to Cloud Firestore Database
+    // Persist to Supabase Database
     try {
       await createBookingOrder(fullOrder);
       await logAuditEvent('CREATE_BOOKING', currentRole, `Order: ${fullOrder.id}`, `Order baru: ${fullOrder.serviceName} (${fullOrder.customerName})`);
     } catch (err) {
-      console.warn('Could not write order directly to Firestore:', err);
+      console.warn('Could not write order directly to Supabase:', err);
     }
   };
 
@@ -137,11 +173,11 @@ export default function App() {
       )
     );
 
-    // Persist to Firestore Admin Database
+    // Persist to Supabase Orders Table
     try {
       await updateAdminOrderStatus(orderId, 'menuju', techName);
     } catch (err) {
-      console.warn('Could not update order status in Firestore:', err);
+      console.warn('Could not update order status in Supabase:', err);
     }
   };
 
@@ -151,12 +187,12 @@ export default function App() {
       prev.map((ord) => (ord.id === orderId ? { ...ord, status: newStatus } : ord))
     );
 
-    // Persist to Firestore Technician Database
+    // Persist to Supabase Orders Table
     try {
       await updateTechnicianOrderStatus(orderId, newStatus);
       await logAuditEvent('UPDATE_STATUS_TECH', 'technician', `Order: ${orderId}`, `Status pengerjaan diubah ke: ${newStatus}`);
     } catch (err) {
-      console.warn('Could not update technician order status in Firestore:', err);
+      console.warn('Could not update technician order status in Supabase:', err);
     }
   };
 
@@ -166,15 +202,21 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-100/95 to-slate-200/80 text-slate-900 flex flex-col font-['Plus_Jakarta_Sans',sans-serif] relative antialiased selection:bg-sky-500 selection:text-white">
-      {/* Top Navigation Bar in Sky Blue Theme with Database Inspector button */}
+      {/* Top Navigation Bar with Supabase Database Explorer access for Admin */}
       <Navbar
         currentRole={currentRole}
         onRoleChange={(role) => {
+          // If user is authenticated in production, they cannot switch to admin unless their profile.role is admin
+          if (authenticatedProfile && role === 'admin' && authenticatedProfile.role !== 'admin') {
+            showToast('Akses ditolak: Akun Anda tidak memiliki peran Admin');
+            return;
+          }
           setCurrentRole(role);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         }}
         onOpenWhatsApp={handleOpenWhatsApp}
         onOpenDatabaseInspector={() => setIsDatabaseInspectorOpen(true)}
+        isDemoMode={isDemoMode}
       />
 
       {/* Main Content Area */}
@@ -215,7 +257,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Database Inspector Modal (Separated Customer, Admin, Technician) */}
+      {/* Database Inspector Modal (Restricted to Admin in Navbar) */}
       <DatabaseInspectorModal
         isOpen={isDatabaseInspectorOpen}
         onClose={() => setIsDatabaseInspectorOpen(false)}
@@ -248,4 +290,3 @@ export default function App() {
     </div>
   );
 }
-

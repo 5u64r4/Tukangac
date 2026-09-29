@@ -121,10 +121,10 @@ export const DatabaseInspectorModal: React.FC<DatabaseInspectorModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black tracking-tight">Backend Database Explorer</h2>
+                <h2 className="text-base sm:text-lg font-black tracking-tight">Supabase Database Explorer</h2>
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  Cloud Firestore Active
+                  Supabase PostgreSQL & Realtime
                 </span>
               </div>
               <p className="text-xs text-slate-400">Pemeriksaan dan verifikasi data terpisah untuk Customer, Admin, dan Teknisi</p>
@@ -568,7 +568,7 @@ export const DatabaseInspectorModal: React.FC<DatabaseInspectorModalProps> = ({
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <Database className="w-4 h-4 text-sky-400" />
-                    <span className="text-xs font-bold text-sky-400 uppercase tracking-wider">Raw Firestore Document Data</span>
+                    <span className="text-xs font-bold text-sky-400 uppercase tracking-wider">Raw Supabase Table Record Data</span>
                   </div>
                   <button 
                     onClick={() => setSelectedRecord(null)}

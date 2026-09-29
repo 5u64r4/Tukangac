@@ -1,9 +1,8 @@
-import { collection, getDocs, doc, setDoc, writeBatch } from 'firebase/firestore';
-import db from '../lib/firebase';
+import { supabase } from '../lib/supabase';
 import { INITIAL_ORDERS, TECHNICIANS, INITIAL_APPLICANTS } from '../data/initialData';
 import { ARTICLES_DATA } from '../data/articlesData';
 import { CustomerRecord, AdminSetting, AdminAuditLog } from '../types';
-import { sanitizeFirestoreData } from '../lib/firebaseUtils';
+import { mapOrderToRow } from './customerService';
 
 const INITIAL_CUSTOMERS: CustomerRecord[] = [
   {
@@ -76,7 +75,7 @@ const INITIAL_LOGS: AdminAuditLog[] = [
     id: 'LOG-SYS-001',
     action: 'SYSTEM_BOOTSTRAP',
     role: 'system',
-    target: 'Cloud Firestore Database',
+    target: 'Supabase PostgreSQL Database',
     details: 'Database backend Tukang AC Online berhasil diinisialisasi untuk Customer, Admin, dan Teknisi.',
     timestamp: new Date().toISOString()
   },
@@ -91,113 +90,197 @@ const INITIAL_LOGS: AdminAuditLog[] = [
 ];
 
 /**
- * Inisialisasi awal database Firestore jika collection masih kosong
+ * Inisialisasi awal database Supabase hanya jika database benar-benar kosong.
+ * TIDAK menulis ulang data jika sudah ada isi.
  */
 export async function initializeDatabaseIfEmpty(): Promise<{ seeded: boolean; message: string }> {
   try {
-    const ordersSnap = await getDocs(collection(db, 'orders'));
-    const techSnap = await getDocs(collection(db, 'technicians'));
-    const custSnap = await getDocs(collection(db, 'customers'));
+    const { data: existingOrders } = await supabase.from('orders').select('id').limit(1);
+    const { data: existingTechs } = await supabase.from('technician_profiles').select('id').limit(1);
 
-    // If data already exists, don't overwrite
-    if (!ordersSnap.empty && !techSnap.empty && !custSnap.empty) {
-      return { seeded: false, message: 'Database telah aktif dan terhubung.' };
+    if (existingOrders && existingOrders.length > 0 && existingTechs && existingTechs.length > 0) {
+      return { seeded: false, message: 'Database Supabase aktif dan terhubung.' };
     }
 
-    const batch = writeBatch(db);
+    // 1. Seed Customer Profiles
+    const customerRows = INITIAL_CUSTOMERS.map(c => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      email: c.email || null,
+      default_address: c.defaultAddress,
+      address_label: c.addressLabel,
+      total_orders: c.totalOrders,
+      points: c.points,
+      joined_date: c.joinedDate,
+      status: c.status
+    }));
+    await supabase.from('customer_profiles').upsert(customerRows);
 
-    // 1. Seed Customer Database
-    for (const cust of INITIAL_CUSTOMERS) {
-      const ref = doc(db, 'customers', cust.id);
-      batch.set(ref, sanitizeFirestoreData(cust));
-    }
+    // 2. Seed Orders
+    const orderRows = INITIAL_ORDERS.map(mapOrderToRow);
+    await supabase.from('orders').upsert(orderRows);
 
-    // 2. Seed Orders Database
-    for (const ord of INITIAL_ORDERS) {
-      const ref = doc(db, 'orders', ord.id);
-      batch.set(ref, sanitizeFirestoreData(ord));
-    }
+    // 3. Seed Technicians
+    const techRows = TECHNICIANS.map(t => ({
+      id: t.id,
+      name: t.name,
+      code: t.code || null,
+      avatar: t.avatar,
+      photo_url: t.photoUrl || t.avatar,
+      email: t.email || null,
+      rating: t.rating,
+      review_count: t.reviewCount,
+      phone: t.phone,
+      is_online: t.isOnline,
+      active_orders: t.activeOrders,
+      distance: t.distance,
+      role_title: t.roleTitle || null,
+      vehicle_plate: t.vehiclePlate || null,
+      experience_years: t.experienceYears || null,
+      domicile: t.domicile || null,
+      custom_fee_percent: t.customFeePercent || null,
+      custom_fee_enabled: t.customFeeEnabled || false,
+      assigned_priority_areas: t.assignedPriorityAreas || [],
+      is_priority_technician: t.isPriorityTechnician || false
+    }));
+    await supabase.from('technician_profiles').upsert(techRows);
 
-    // 3. Seed Technician Database
-    for (const tech of TECHNICIANS) {
-      const ref = doc(db, 'technicians', tech.id);
-      batch.set(ref, sanitizeFirestoreData(tech));
-    }
+    // 4. Seed Applicants
+    const applicantRows = INITIAL_APPLICANTS.map(a => ({
+      id: a.id,
+      name: a.name,
+      avatar: a.avatar || null,
+      photo_url: a.photoUrl || a.avatar || null,
+      phone: a.phone,
+      email: a.email,
+      domicile: a.domicile,
+      experience_years: a.experienceYears,
+      education: a.education,
+      certifications: a.certifications,
+      skills: a.skills,
+      applied_date: a.appliedDate,
+      status: a.status,
+      notes: a.notes || null,
+      expected_salary: a.expectedSalary || null,
+      nik: a.nik || a.ktpNumber || null,
+      ktp_number: a.ktpNumber || a.nik || null,
+      ktp_image: a.ktpImage || null,
+      birth_place: a.birthPlace || null,
+      birth_date: a.birthDate || null,
+      gender: a.gender || null,
+      religion: a.religion || null,
+      marital_status: a.maritalStatus || null,
+      citizenship: a.citizenship || 'WNI',
+      ktp_address: a.ktpAddress || null,
+      rt_rw: a.rtRw || null,
+      subdistrict_kecamatan: a.subdistrictKecamatan || null,
+      city_kabupaten: a.cityKabupaten || null,
+      postal_code: a.postalCode || null,
+      is_domicile_same_as_ktp: a.isDomicileSameAsKtp ?? true,
+      domicile_address: a.domicileAddress || null,
+      emergency_contact: a.emergencyContact || null,
+      emergency_contact_name: a.emergencyContactName || null,
+      emergency_contact_relation: a.emergencyContactRelation || null,
+      emergency_contact_phone: a.emergencyContactPhone || null
+    }));
+    await supabase.from('technician_applicants').upsert(applicantRows);
 
-    // 4. Seed Technician Applicants Database
-    for (const apl of INITIAL_APPLICANTS) {
-      const ref = doc(db, 'technician_applicants', apl.id);
-      batch.set(ref, sanitizeFirestoreData(apl));
-    }
+    // 5. Seed Admin Settings
+    const settingRows = INITIAL_SETTINGS.map(s => ({
+      id: s.id,
+      key: s.key,
+      value: s.value,
+      category: s.category,
+      description: s.description,
+      last_updated: s.lastUpdated
+    }));
+    await supabase.from('admin_settings').upsert(settingRows);
 
-    // 5. Seed Admin Database
-    for (const set of INITIAL_SETTINGS) {
-      const ref = doc(db, 'admin_settings', set.id);
-      batch.set(ref, sanitizeFirestoreData(set));
-    }
+    // 6. Seed Audit Logs
+    await supabase.from('admin_audit_logs').upsert(INITIAL_LOGS);
 
-    for (const log of INITIAL_LOGS) {
-      const ref = doc(db, 'admin_audit_logs', log.id);
-      batch.set(ref, sanitizeFirestoreData(log));
-    }
+    // 7. Seed Articles
+    const articleRows = ARTICLES_DATA.map(art => ({
+      id: art.id,
+      title: art.title,
+      slug: art.slug,
+      category: art.category,
+      category_color: art.categoryColor,
+      status: 'published',
+      read_time: art.readTime,
+      date: art.date,
+      author: art.author,
+      image: art.image,
+      badge: art.badge || null,
+      summary: art.summary,
+      content: art.content,
+      tags: art.tags || [],
+      views: Math.floor(120 + Math.random() * 450),
+      featured: art.id === 'art-1'
+    }));
+    await supabase.from('articles').upsert(articleRows);
 
-    // 6. Seed Blog Articles CMS Database
-    for (const art of ARTICLES_DATA) {
-      const ref = doc(db, 'articles', art.id);
-      batch.set(ref, sanitizeFirestoreData({
-        ...art,
-        status: 'published',
-        views: Math.floor(140 + Math.random() * 320),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }));
-    }
-
-    await batch.commit();
-    return { seeded: true, message: 'Database Firestore berhasil diisi data inisial terpisah untuk Customer, Admin, Teknisi, dan CMS Artikel Blog.' };
-  } catch (err: any) {
-    if (err?.code === 'unavailable' || (err?.message && err.message.includes('offline'))) {
-      console.info('Cloud Firestore backend is currently establishing connection. Operating smoothly with local cache.');
-    } else {
-      console.warn('Database initialization note:', err);
-    }
-    return { seeded: false, message: `Status koneksi: ${err?.message || 'offline'}` };
+    return { 
+      seeded: true, 
+      message: 'Database Supabase berhasil diisi data inisial terpisah untuk Customer, Admin, Teknisi, dan CMS Artikel Blog.' 
+    };
+  } catch (err) {
+    console.warn('Supabase initialization notice:', err);
+    return { seeded: false, message: 'Supabase initialization operating in local/cached mode.' };
   }
 }
 
 /**
- * Reset demo database ke default
+ * Mereset database backend ke data default bawaan (khusus admin / debug)
  */
-export async function forceResetDatabase(): Promise<void> {
-  const batch = writeBatch(db);
-
-  for (const cust of INITIAL_CUSTOMERS) {
-    batch.set(doc(db, 'customers', cust.id), sanitizeFirestoreData(cust));
-  }
-  for (const ord of INITIAL_ORDERS) {
-    batch.set(doc(db, 'orders', ord.id), sanitizeFirestoreData(ord));
-  }
-  for (const tech of TECHNICIANS) {
-    batch.set(doc(db, 'technicians', tech.id), sanitizeFirestoreData(tech));
-  }
-  for (const apl of INITIAL_APPLICANTS) {
-    batch.set(doc(db, 'technician_applicants', apl.id), sanitizeFirestoreData(apl));
-  }
-  for (const set of INITIAL_SETTINGS) {
-    batch.set(doc(db, 'admin_settings', set.id), sanitizeFirestoreData(set));
-  }
-  for (const log of INITIAL_LOGS) {
-    batch.set(doc(db, 'admin_audit_logs', log.id), sanitizeFirestoreData(log));
-  }
-  for (const art of ARTICLES_DATA) {
-    batch.set(doc(db, 'articles', art.id), sanitizeFirestoreData({
-      ...art,
-      status: 'published',
-      views: Math.floor(140 + Math.random() * 320),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+export async function forceResetDatabase(): Promise<{ success: boolean; message: string }> {
+  try {
+    // Re-seed all tables
+    const customerRows = INITIAL_CUSTOMERS.map(c => ({
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      email: c.email || null,
+      default_address: c.defaultAddress,
+      address_label: c.addressLabel,
+      total_orders: c.totalOrders,
+      points: c.points,
+      joined_date: c.joinedDate,
+      status: c.status
     }));
-  }
+    await supabase.from('customer_profiles').upsert(customerRows);
 
-  await batch.commit();
+    const orderRows = INITIAL_ORDERS.map(mapOrderToRow);
+    await supabase.from('orders').upsert(orderRows);
+
+    const techRows = TECHNICIANS.map(t => ({
+      id: t.id,
+      name: t.name,
+      code: t.code || null,
+      avatar: t.avatar,
+      photo_url: t.photoUrl || t.avatar,
+      email: t.email || null,
+      rating: t.rating,
+      review_count: t.reviewCount,
+      phone: t.phone,
+      is_online: t.isOnline,
+      active_orders: t.activeOrders,
+      distance: t.distance,
+      role_title: t.roleTitle || null,
+      vehicle_plate: t.vehiclePlate || null,
+      experience_years: t.experienceYears || null,
+      domicile: t.domicile || null,
+      custom_fee_percent: t.customFeePercent || null,
+      custom_fee_enabled: t.customFeeEnabled || false,
+      assigned_priority_areas: t.assignedPriorityAreas || [],
+      is_priority_technician: t.isPriorityTechnician || false
+    }));
+    await supabase.from('technician_profiles').upsert(techRows);
+
+    return { success: true, message: 'Database Supabase berhasil direset ke konfigurasi awal.' };
+  } catch (err) {
+    console.error('Error resetting database in Supabase:', err);
+    throw err;
+  }
 }

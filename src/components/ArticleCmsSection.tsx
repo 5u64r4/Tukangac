@@ -139,7 +139,7 @@ export const ArticleCmsSection: React.FC<ArticleCmsSectionProps> = ({
     setIsRefreshing(true);
     await onRefreshArticles();
     setIsRefreshing(false);
-    onToast('Data CMS Artikel Blog berhasil disinkronkan dengan Cloud Firestore.');
+    onToast('Data CMS Artikel Blog berhasil disinkronkan dengan Supabase Database.');
   };
 
   return (
@@ -167,7 +167,7 @@ export const ArticleCmsSection: React.FC<ArticleCmsSectionProps> = ({
               onClick={handleManualRefresh}
               disabled={isRefreshing}
               className="px-3.5 py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center gap-2 transition-all border border-white/10 cursor-pointer"
-              title="Sinkronkan data dari Firestore"
+              title="Sinkronkan data dari Supabase"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
               <span className="hidden sm:inline">Sync Cloud</span>
@@ -440,7 +440,7 @@ export const ArticleCmsSection: React.FC<ArticleCmsSectionProps> = ({
             <div>
               <h3 className="font-extrabold text-base text-slate-900">Hapus Artikel dari CMS?</h3>
               <p className="text-xs text-slate-500 mt-1">
-                Apakah Anda yakin ingin menghapus artikel <strong className="text-slate-800">"{deleteTarget.title}"</strong> dari database Cloud Firestore? Tindakan ini tidak dapat dibatalkan.
+                Apakah Anda yakin ingin menghapus artikel <strong className="text-slate-800">"{deleteTarget.title}"</strong> dari database Supabase? Tindakan ini tidak dapat dibatalkan.
               </p>
             </div>
 

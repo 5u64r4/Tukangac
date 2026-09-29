@@ -255,7 +255,7 @@ export const ArticleEditorModal: React.FC<ArticleEditorModalProps> = ({
       };
 
       await onSave(articlePayload);
-      onToast(`Artikel "${articlePayload.title}" berhasil disimpan di CMS Firestore!`);
+      onToast(`Artikel "${articlePayload.title}" berhasil disimpan di CMS Supabase!`);
       onClose();
     } catch (err) {
       console.error('Error saving article in CMS:', err);
