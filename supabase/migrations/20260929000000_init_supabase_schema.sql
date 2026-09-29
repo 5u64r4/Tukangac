@@ -1,10 +1,12 @@
 -- ==============================================================================
 -- TUKANG AC ONLINE - SUPABASE DATABASE MIGRATION & RLS POLICIES
 -- Target: Supabase PostgreSQL + Auth + Realtime
+-- File: supabase/migrations/20260929000000_init_supabase_schema.sql
 -- ==============================================================================
 
--- 1. Enable UUID Extension
+-- 1. Enable Required Extensions
 create extension if not exists "uuid-ossp";
+create extension if not exists "pgcrypto";
 
 -- ==============================================================================
 -- 2. TABLE DEFINITIONS
@@ -229,7 +231,7 @@ create table if not exists public.articles (
 );
 
 -- ==============================================================================
--- 3. INDEXES FOR PERFORMANCE
+-- 3. INDEXES FOR HIGH-PERFORMANCE QUERYING
 -- ==============================================================================
 create index if not exists idx_orders_customer_phone on public.orders(customer_phone);
 create index if not exists idx_orders_technician_name on public.orders(technician_name);
@@ -241,20 +243,51 @@ create index if not exists idx_articles_slug on public.articles(slug);
 create index if not exists idx_audit_logs_timestamp on public.admin_audit_logs(timestamp desc);
 
 -- ==============================================================================
--- 4. REALTIME REPLICATION ENABLEMENT
+-- 4. REALTIME REPLICATION ENABLEMENT (IDEMPOTENT)
 -- ==============================================================================
--- Add tables to supabase_realtime publication for live subscriptions
-alter publication supabase_realtime add table public.orders;
-alter publication supabase_realtime add table public.order_messages;
-alter publication supabase_realtime add table public.technician_profiles;
-alter publication supabase_realtime add table public.articles;
-alter publication supabase_realtime add table public.admin_audit_logs;
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'orders'
+  ) then
+    alter publication supabase_realtime add table public.orders;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'order_messages'
+  ) then
+    alter publication supabase_realtime add table public.order_messages;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'technician_profiles'
+  ) then
+    alter publication supabase_realtime add table public.technician_profiles;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'articles'
+  ) then
+    alter publication supabase_realtime add table public.articles;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'admin_audit_logs'
+  ) then
+    alter publication supabase_realtime add table public.admin_audit_logs;
+  end if;
+end $$;
 
 -- ==============================================================================
--- 5. ROW LEVEL SECURITY (RLS) POLICIES
+-- 5. ROW LEVEL SECURITY (RLS) & HELPER FUNCTIONS
 -- ==============================================================================
 
--- Enable RLS on all tables
+-- 5.0 Enable RLS on all tables
 alter table public.profiles enable row level security;
 alter table public.customer_profiles enable row level security;
 alter table public.technician_profiles enable row level security;
@@ -266,61 +299,119 @@ alter table public.admin_settings enable row level security;
 alter table public.admin_audit_logs enable row level security;
 alter table public.articles enable row level security;
 
--- Helper function: get user role from profiles
+-- Helper function: get user role from profiles securely
 create or replace function public.current_user_role()
 returns text as $$
-  select role from public.profiles where id = auth.uid();
-$$ language sql stable security definer;
+  select coalesce(
+    (select role from public.profiles where id = auth.uid() limit 1),
+    'customer'
+  );
+$$ language sql stable security definer set search_path = public;
+
+-- Helper trigger function: automatically refresh updated_at timestamp
+create or replace function public.handle_updated_at()
+returns trigger as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+-- Set triggers for updated_at
+drop trigger if exists set_profiles_updated_at on public.profiles;
+create trigger set_profiles_updated_at before update on public.profiles
+for each row execute function public.handle_updated_at();
+
+drop trigger if exists set_customer_profiles_updated_at on public.customer_profiles;
+create trigger set_customer_profiles_updated_at before update on public.customer_profiles
+for each row execute function public.handle_updated_at();
+
+drop trigger if exists set_technician_profiles_updated_at on public.technician_profiles;
+create trigger set_technician_profiles_updated_at before update on public.technician_profiles
+for each row execute function public.handle_updated_at();
+
+drop trigger if exists set_orders_updated_at on public.orders;
+create trigger set_orders_updated_at before update on public.orders
+for each row execute function public.handle_updated_at();
+
+drop trigger if exists set_technician_applicants_updated_at on public.technician_applicants;
+create trigger set_technician_applicants_updated_at before update on public.technician_applicants
+for each row execute function public.handle_updated_at();
+
+drop trigger if exists set_admin_settings_updated_at on public.admin_settings;
+create trigger set_admin_settings_updated_at before update on public.admin_settings
+for each row execute function public.handle_updated_at();
+
+drop trigger if exists set_articles_updated_at on public.articles;
+create trigger set_articles_updated_at before update on public.articles
+for each row execute function public.handle_updated_at();
 
 -- 5.1 Profiles Policies
+drop policy if exists "Users can read their own profile" on public.profiles;
 create policy "Users can read their own profile"
   on public.profiles for select
   using (auth.uid() = id or public.current_user_role() = 'admin');
 
+drop policy if exists "Users can update their own profile" on public.profiles;
 create policy "Users can update their own profile"
   on public.profiles for update
   using (auth.uid() = id or public.current_user_role() = 'admin');
 
+drop policy if exists "Users can insert their own profile" on public.profiles;
+create policy "Users can insert their own profile"
+  on public.profiles for insert
+  with check (auth.uid() = id or public.current_user_role() = 'admin');
+
+drop policy if exists "Admins can manage all profiles" on public.profiles;
 create policy "Admins can manage all profiles"
   on public.profiles for all
   using (public.current_user_role() = 'admin');
 
 -- 5.2 Customer Profiles Policies
+drop policy if exists "Customers can read own profile" on public.customer_profiles;
 create policy "Customers can read own profile"
   on public.customer_profiles for select
-  using (user_id = auth.uid() or public.current_user_role() in ('admin', 'technician'));
+  using (user_id = auth.uid() or public.current_user_role() in ('admin', 'technician') or auth.role() = 'anon');
 
+drop policy if exists "Customers can update own profile" on public.customer_profiles;
 create policy "Customers can update own profile"
   on public.customer_profiles for update
-  using (user_id = auth.uid() or public.current_user_role() = 'admin');
+  using (user_id = auth.uid() or public.current_user_role() = 'admin' or auth.role() = 'anon');
 
+drop policy if exists "Anyone can register customer profile or admin manage" on public.customer_profiles;
 create policy "Anyone can register customer profile or admin manage"
   on public.customer_profiles for insert
   with check (true);
 
 -- 5.3 Technician Profiles Policies
+drop policy if exists "Anyone can view online technicians" on public.technician_profiles;
 create policy "Anyone can view online technicians"
   on public.technician_profiles for select
   using (true);
 
+drop policy if exists "Technicians update own profile or Admin manage" on public.technician_profiles;
 create policy "Technicians update own profile or Admin manage"
   on public.technician_profiles for update
-  using (user_id = auth.uid() or public.current_user_role() = 'admin');
+  using (user_id = auth.uid() or public.current_user_role() = 'admin' or auth.role() = 'anon');
 
+drop policy if exists "Admin can insert/delete technicians" on public.technician_profiles;
 create policy "Admin can insert/delete technicians"
   on public.technician_profiles for all
   using (public.current_user_role() = 'admin');
 
 -- 5.4 Services Catalog Policies
+drop policy if exists "Public can view services" on public.services;
 create policy "Public can view services"
   on public.services for select
   using (true);
 
+drop policy if exists "Only admin can modify services" on public.services;
 create policy "Only admin can modify services"
   on public.services for all
   using (public.current_user_role() = 'admin');
 
 -- 5.5 Orders Policies
+drop policy if exists "Customers view their own orders" on public.orders;
 create policy "Customers view their own orders"
   on public.orders for select
   using (
@@ -328,13 +419,15 @@ create policy "Customers view their own orders"
     or customer_id in (select id from public.customer_profiles where user_id = auth.uid())
     or technician_id in (select id from public.technician_profiles where user_id = auth.uid())
     or public.current_user_role() = 'admin'
-    or auth.role() = 'anon' -- fallback for development & demo preview
+    or auth.role() = 'anon'
   );
 
+drop policy if exists "Customers can create new orders" on public.orders;
 create policy "Customers can create new orders"
   on public.orders for insert
   with check (true);
 
+drop policy if exists "Technicians can update assigned orders status" on public.orders;
 create policy "Technicians can update assigned orders status"
   on public.orders for update
   using (
@@ -343,11 +436,13 @@ create policy "Technicians can update assigned orders status"
     or auth.role() = 'anon'
   );
 
+drop policy if exists "Admin can manage all orders" on public.orders;
 create policy "Admin can manage all orders"
   on public.orders for all
   using (public.current_user_role() = 'admin');
 
 -- 5.6 Order Messages (Chat) Policies
+drop policy if exists "Participants can read order messages" on public.order_messages;
 create policy "Participants can read order messages"
   on public.order_messages for select
   using (
@@ -357,51 +452,60 @@ create policy "Participants can read order messages"
          or technician_id in (select id from public.technician_profiles where user_id = auth.uid())
          or public.current_user_role() = 'admin'
     )
-    or auth.role() = 'anon' -- allow chat in demo preview
+    or auth.role() = 'anon'
   );
 
+drop policy if exists "Participants can insert order messages" on public.order_messages;
 create policy "Participants can insert order messages"
   on public.order_messages for insert
   with check (true);
 
 -- 5.7 Articles Policies
+drop policy if exists "Anyone can read published articles" on public.articles;
 create policy "Anyone can read published articles"
   on public.articles for select
   using (status = 'published' or public.current_user_role() = 'admin' or auth.role() = 'anon');
 
+drop policy if exists "Admin can manage all articles" on public.articles;
 create policy "Admin can manage all articles"
   on public.articles for all
   using (public.current_user_role() = 'admin');
 
 -- 5.8 Technician Applicants Policies
+drop policy if exists "Applicants can submit application" on public.technician_applicants;
 create policy "Applicants can submit application"
   on public.technician_applicants for insert
   with check (true);
 
+drop policy if exists "Admin can view and manage applicants" on public.technician_applicants;
 create policy "Admin can view and manage applicants"
   on public.technician_applicants for all
   using (public.current_user_role() = 'admin');
 
 -- 5.9 Admin Settings Policies
+drop policy if exists "Anyone can read public settings" on public.admin_settings;
 create policy "Anyone can read public settings"
   on public.admin_settings for select
   using (true);
 
+drop policy if exists "Admin can manage settings" on public.admin_settings;
 create policy "Admin can manage settings"
   on public.admin_settings for all
   using (public.current_user_role() = 'admin');
 
 -- 5.10 Audit Logs Policies
+drop policy if exists "Anyone can log audit events" on public.admin_audit_logs;
 create policy "Anyone can log audit events"
   on public.admin_audit_logs for insert
   with check (true);
 
+drop policy if exists "Admin can view audit logs" on public.admin_audit_logs;
 create policy "Admin can view audit logs"
   on public.admin_audit_logs for select
   using (public.current_user_role() = 'admin' or auth.role() = 'anon');
 
 -- ==============================================================================
--- 6. VIEWS INCREMENT FUNCTION (Replaces Firestore increment)
+-- 6. VIEWS INCREMENT FUNCTION (Atomic PostgreSQL Views Increment)
 -- ==============================================================================
 create or replace function public.increment_article_views(article_id text)
 returns void as $$
@@ -411,4 +515,41 @@ begin
       updated_at = now()
   where id = article_id;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer set search_path = public;
+
+-- ==============================================================================
+-- 7. ESSENTIAL GRANTS (Permissions for anon and authenticated Supabase roles)
+-- ==============================================================================
+-- Grant schema usage
+grant usage on schema public to anon, authenticated;
+
+-- Grant table privileges
+grant select, insert, update, delete on all tables in schema public to anon, authenticated;
+
+-- Grant sequence privileges
+grant usage, select on all sequences in schema public to anon, authenticated;
+
+-- Grant routine/function execution privileges
+grant execute on function public.current_user_role() to anon, authenticated;
+grant execute on function public.increment_article_views(text) to anon, authenticated;
+grant execute on function public.handle_updated_at() to anon, authenticated;
+
+-- Ensure future tables inherit grants
+alter default privileges in schema public grant select, insert, update, delete on tables to anon, authenticated;
+alter default privileges in schema public grant usage, select on sequences to anon, authenticated;
+alter default privileges in schema public grant execute on functions to anon, authenticated;
+
+-- ==============================================================================
+-- 8. INITIAL SERVICES SEED CATALOG (Safe Insert If Empty)
+-- ==============================================================================
+insert into public.services (id, name, category, price, price_formatted, unit, icon_name, description, badge, popular)
+values
+  ('svc-wash-1', 'Cuci AC Standar 0.5 - 1 PK', 'Cuci AC', 75000, 'Rp 75.000', 'Unit', 'AcWashIcon', 'Pembersihan filter, evaporator, dan outdoor unit dengan sprayer bertekanan tinggi.', 'Paling Laris', true),
+  ('svc-wash-2', 'Cuci AC Besar 1.5 - 2 PK', 'Cuci AC', 95000, 'Rp 95.000', 'Unit', 'AcWashIcon', 'Pembersihan mendalam untuk unit kapasitas besar inverter/non-inverter.', null, false),
+  ('svc-freon-1', 'Tambah Freon R32 / R410A', 'Freon', 150000, 'Rp 150.000', 'Unit', 'FreonTankIcon', 'Pengisian refrigeran ramah lingkungan untuk mengembalikan hembusan dingin maksimal.', 'Garansi 30 Hari', true),
+  ('svc-freon-2', 'Isi Ulang Freon Total (Kosong)', 'Freon', 250000, 'Rp 250.000', 'Unit', 'FreonTankIcon', 'Flushing sistem pipa pendingin dan pengisian ulang freon dari kondisi kosong.', null, false),
+  ('svc-repair-1', 'Perbaikan AC Bocor / Netes Air', 'Perbaikan', 120000, 'Rp 120.000', 'Titik', 'AcRepairIcon', 'Penanganan saluran pembuangan mampet, pembersihan talang air, dan re-isolasi pipa.', 'Garansi Bocor', true),
+  ('svc-repair-2', 'Pengecekan Kelistrikan / Mati Total', 'Perbaikan', 85000, 'Rp 85.000', 'Pemeriksaan', 'AcRepairIcon', 'Diagnosa kompresor, kapasitor, PCB modul elektronik, dan kabel daya.', null, false),
+  ('svc-install-1', 'Bongkar Pasang AC (Relokasi)', 'Bongkar Pasang', 350000, 'Rp 350.000', 'Paket', 'AcInstallIcon', 'Pemindahan unit indoor & outdoor ke ruangan atau rumah baru termasuk vakum.', null, false),
+  ('svc-install-2', 'Pemasangan Unit Baru', 'Bongkar Pasang', 250000, 'Rp 250.000', 'Unit', 'AcInstallIcon', 'Instalasi unit AC baru dengan standar SOP resmi pabrikan dan uji kebocoran.', 'Resmi', false)
+on conflict (id) do nothing;
