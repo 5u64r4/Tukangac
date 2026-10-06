@@ -85,6 +85,15 @@ class MockQueryBuilder {
     return this;
   }
 
+  ilike(column: string, value: string) {
+    const target = String(value).toLowerCase();
+    this.filters.push(item => {
+      const val = String(item[column] ?? item[this.toSnakeCase(column)] ?? item[this.toCamelCase(column)] ?? '').toLowerCase();
+      return val === target;
+    });
+    return this;
+  }
+
   order(column: string, options: { ascending?: boolean } = { ascending: true }) {
     this.orderField = column;
     this.orderAscending = options.ascending ?? true;
@@ -92,6 +101,11 @@ class MockQueryBuilder {
   }
 
   single() {
+    this.isSingle = true;
+    return this;
+  }
+
+  maybeSingle() {
     this.isSingle = true;
     return this;
   }
@@ -277,20 +291,143 @@ const createLocalMockClient = () => {
     },
     auth: {
       signUp: async ({ email, password, options }: any) => {
+        const normalizedEmail = (email || '').trim().toLowerCase();
+        const role = normalizedEmail === 'sugara.ardi@gmail.com' ? 'superadmin' : 'customer';
+        const fullName = options?.data?.full_name || 'Pengguna Baru';
+        const phone = options?.data?.phone || '';
+        const id = `usr_${Date.now()}`;
+
         const user = {
-          id: `usr_${Date.now()}`,
+          id,
           email,
-          user_metadata: options?.data || {}
+          user_metadata: {
+            full_name: fullName,
+            phone,
+            role
+          }
         };
+
+        // Upsert to local profiles table
+        const profiles = getLocalTableData('profiles');
+        const existingIdx = profiles.findIndex((p: any) => p.email && p.email.toLowerCase() === normalizedEmail);
+        const profileRecord = {
+          id,
+          email,
+          full_name: fullName,
+          phone,
+          role,
+          is_active: true,
+          created_at: new Date().toISOString()
+        };
+
+        if (existingIdx >= 0) {
+          profiles[existingIdx] = { ...profiles[existingIdx], ...profileRecord };
+        } else {
+          profiles.push(profileRecord);
+        }
+        setLocalTableData('profiles', profiles);
+
         localStorage.setItem('sb_current_user', JSON.stringify(user));
         return { data: { user, session: { user } }, error: null };
       },
-      signInWithPassword: async ({ email }: any) => {
-        const user = {
-          id: `usr_${Date.now()}`,
-          email,
-          user_metadata: { role: 'admin' }
+      signInWithPassword: async ({ email, password }: any) => {
+        const normalizedEmail = (email || '').trim().toLowerCase();
+
+        // One-way SHA-256 hash helper for offline verification (no plain text passwords stored)
+        const sha256Hex = async (str: string): Promise<string> => {
+          try {
+            const msgUint8 = new TextEncoder().encode(str);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+          } catch {
+            return '';
+          }
         };
+
+        // Tester account role mapping with cryptographic password digests
+        const testerAccountMap: Record<string, { passHash: string; role: string; name: string; phone: string }> = {
+          'budisantoso@gmail.com': {
+            passHash: '15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225',
+            role: 'customer',
+            name: 'Budi Santoso',
+            phone: '0812-3456-7890'
+          },
+          'andipratama@gmail.com': {
+            passHash: '15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225',
+            role: 'technician',
+            name: 'Andi Pratama',
+            phone: '0812-9876-5432'
+          },
+          'ardi5u64r4@gmail.com': {
+            passHash: '63640264849a87c90356129d99ea165e37aa5fabc1fea46906df1a7ca50db492',
+            role: 'admin',
+            name: 'Ardi Sugara (Admin)',
+            phone: '0812-3456-7890'
+          },
+          'sugara.ardi@gmail.com': {
+            passHash: '347c9a3a91ceee960653d6c8ef724405f6896279ce72d8e77fc771f7ae2b0bd4',
+            role: 'superadmin',
+            name: 'Ardi Sugara (Superadmin)',
+            phone: '0812-3456-7890'
+          }
+        };
+
+        // If tester account, validate using cryptographic digest
+        if (testerAccountMap[normalizedEmail]) {
+          const expected = testerAccountMap[normalizedEmail];
+          const inputHash = await sha256Hex(password || '');
+          if (inputHash !== expected.passHash) {
+            return {
+              data: { user: null, session: null },
+              error: new Error('Password salah. Silakan coba lagi.')
+            };
+          }
+        }
+
+        const profiles = getLocalTableData('profiles');
+        const existing = profiles.find((p: any) => p.email && p.email.toLowerCase() === normalizedEmail);
+
+        let role = existing?.role || 'customer';
+        let fullName = existing?.full_name || 'Pengguna';
+        let phone = existing?.phone || '0812-3456-7890';
+        let id = existing?.id || `usr_${Date.now()}`;
+
+        if (testerAccountMap[normalizedEmail]) {
+          role = testerAccountMap[normalizedEmail].role;
+          fullName = testerAccountMap[normalizedEmail].name;
+          phone = testerAccountMap[normalizedEmail].phone;
+        }
+
+        // Keep local profiles consistent
+        const profileRecord = {
+          id,
+          email,
+          full_name: fullName,
+          phone,
+          role,
+          is_active: true,
+          created_at: existing?.created_at || new Date().toISOString()
+        };
+
+        const existingIdx = profiles.findIndex((p: any) => p.email && p.email.toLowerCase() === normalizedEmail);
+        if (existingIdx >= 0) {
+          profiles[existingIdx] = { ...profiles[existingIdx], ...profileRecord };
+        } else {
+          profiles.push(profileRecord);
+        }
+        setLocalTableData('profiles', profiles);
+
+        const user = {
+          id,
+          email,
+          user_metadata: {
+            full_name: fullName,
+            phone,
+            role
+          }
+        };
+
         localStorage.setItem('sb_current_user', JSON.stringify(user));
         return { data: { user, session: { user } }, error: null };
       },

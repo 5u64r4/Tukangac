@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Order, Technician, TechnicianApplicant, ApplicantStatus, Article, AdminTab, CrowdsourcingConfig, AreaPriorityRule } from '../types';
 import { INITIAL_APPLICANTS } from '../data/initialData';
+import { getAllApplicants, updateApplicantStatus, saveApplicant } from '../services/adminService';
 import { TechnicianApplicantsSection } from './TechnicianApplicantsSection';
 import { ArticleCmsSection } from './ArticleCmsSection';
 import { TechnicianReportsSection } from './TechnicianReportsSection';
@@ -77,6 +78,26 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const [applicants, setApplicants] = useState<TechnicianApplicant[]>(INITIAL_APPLICANTS);
   const [areaRules, setAreaRules] = useState<AreaPriorityRule[]>(() => getSavedAreaPriorityRules());
+
+  // Load applicants from database and merge with initial records
+  useEffect(() => {
+    let isMounted = true;
+    getAllApplicants().then((dbApplicants) => {
+      if (isMounted && dbApplicants && dbApplicants.length > 0) {
+        setApplicants((prev) => {
+          const map = new Map<string, TechnicianApplicant>();
+          // DB applicants take precedence
+          prev.forEach((a) => map.set(a.id, a));
+          dbApplicants.forEach((a) => map.set(a.id, a));
+          return Array.from(map.values());
+        });
+      }
+    }).catch((err) => console.warn('Could not fetch applicants from Supabase:', err));
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   const [showManualModal, setShowManualModal] = useState(false);
   const [selectedDetailOrder, setSelectedDetailOrder] = useState<Order | null>(null);
   const [chatModalOrder, setChatModalOrder] = useState<Order | null>(null);
@@ -105,14 +126,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const pendingApplicantsCount = safeApplicants.filter(a => a.status === 'pending').length;
   const draftArticlesCount = safeArticles.filter(a => a.status === 'draft').length;
 
-  const handleUpdateApplicantStatus = (applicantId: string, newStatus: ApplicantStatus) => {
+  const handleUpdateApplicantStatus = async (applicantId: string, newStatus: ApplicantStatus) => {
     setApplicants(prev => prev.map(app => 
       app.id === applicantId ? { ...app, status: newStatus } : app
     ));
+    try {
+      await updateApplicantStatus(applicantId, newStatus);
+    } catch (err) {
+      console.warn('Failed to sync applicant status to Supabase:', err);
+    }
   };
 
-  const handleAddApplicant = (newApplicant: TechnicianApplicant) => {
+  const handleAddApplicant = async (newApplicant: TechnicianApplicant) => {
     setApplicants(prev => [newApplicant, ...prev]);
+    try {
+      await saveApplicant(newApplicant);
+    } catch (err) {
+      console.warn('Failed to save applicant to Supabase:', err);
+    }
   };
 
   // New manual order state

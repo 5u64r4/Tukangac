@@ -209,10 +209,43 @@ export async function saveApplicant(applicant: TechnicianApplicant): Promise<voi
 }
 
 /**
- * Memperbarui status pelamar teknisi (pending, diterima, ditolak)
+ * Mengambil data pengajuan pelamar berdasarkan email pemohon
+ */
+export async function getApplicantByEmail(email: string): Promise<TechnicianApplicant | null> {
+  if (!email) return null;
+  try {
+    const { data, error } = await supabase
+      .from(APPLICANTS_TABLE)
+      .select('*')
+      .ilike('email', email.trim())
+      .order('applied_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return mapApplicantRow(data);
+  } catch (err) {
+    console.warn('Error fetching applicant by email:', err);
+    return null;
+  }
+}
+
+/**
+ * Memperbarui status pelamar teknisi (pending, diterima, ditolak, diperbaiki)
+ * Jika status diterima: otomatis sinkronkan role user di tabel profiles menjadi 'technician'
+ * Jika status ditolak/pending/diperbaiki: pastikan role user di tabel profiles tetap 'customer'
  */
 export async function updateApplicantStatus(applicantId: string, status: ApplicantStatus): Promise<void> {
   try {
+    const { data: applicantData, error: fetchErr } = await supabase
+      .from(APPLICANTS_TABLE)
+      .select('*')
+      .eq('id', applicantId)
+      .maybeSingle();
+
     const { error } = await supabase
       .from(APPLICANTS_TABLE)
       .update({ status, updated_at: new Date().toISOString() })
@@ -220,6 +253,23 @@ export async function updateApplicantStatus(applicantId: string, status: Applica
 
     if (error) {
       throw error;
+    }
+
+    // Role synchronization: promote to technician when approved; restore to customer if rejected
+    const targetEmail = applicantData?.email;
+    if (targetEmail) {
+      if (status === 'diterima') {
+        await supabase
+          .from('profiles')
+          .update({ role: 'technician', updated_at: new Date().toISOString() })
+          .ilike('email', targetEmail.trim());
+      } else if (status === 'ditolak') {
+        // If rejected, ensure they remain customer (never elevated)
+        await supabase
+          .from('profiles')
+          .update({ role: 'customer', updated_at: new Date().toISOString() })
+          .ilike('email', targetEmail.trim());
+      }
     }
 
     await logAuditEvent('UPDATE_APPLICANT_STATUS', 'admin', `Applicant: ${applicantId}`, `Status diubah menjadi: ${status}`);

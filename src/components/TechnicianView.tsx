@@ -1034,6 +1034,9 @@ export const TechnicianView: React.FC<TechnicianViewProps> = ({
                 <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
                   <h2 className="text-xl font-black text-slate-900">{technicianProfile.name}</h2>
                   <BadgeCheck className="w-5 h-5 text-sky-600" />
+                  <span className="inline-flex items-center gap-1 text-[10px] font-black text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full border border-teal-300 shadow-2xs">
+                    Teknisi
+                  </span>
                 </div>
                 <div className="text-xs font-bold text-sky-700">{technicianProfile.roleTitle}</div>
                 <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap pt-1">

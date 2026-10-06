@@ -18,7 +18,7 @@ create table if not exists public.profiles (
   full_name text not null,
   phone text,
   email text,
-  role text not null check (role in ('customer', 'admin', 'technician')) default 'customer',
+  role text not null check (role in ('customer', 'technician', 'admin', 'superadmin')) default 'customer',
   avatar_url text,
   is_active boolean default true,
   created_at timestamptz default now(),
@@ -151,7 +151,7 @@ create table if not exists public.technician_applicants (
   certifications text[] default '{}',
   skills text[] default '{}',
   applied_date text not null,
-  status text not null check (status in ('pending', 'diterima', 'ditolak')) default 'pending',
+  status text not null check (status in ('pending', 'diterima', 'ditolak', 'diperbaiki')) default 'pending',
   notes text,
   expected_salary text,
   
@@ -346,37 +346,147 @@ drop trigger if exists set_articles_updated_at on public.articles;
 create trigger set_articles_updated_at before update on public.articles
 for each row execute function public.handle_updated_at();
 
+-- Helper trigger function: enforce superadmin role for Sugara.ardi19@gmail.com and ardi5u64r4@gmail.com,
+-- and prevent unauthorized role escalations (Customer -> Technician/Admin/Superadmin, Technician -> Admin/Superadmin, Admin -> Superadmin)
+create or replace function public.enforce_superadmin_role()
+returns trigger as $$
+declare
+  v_caller_role text;
+begin
+  -- 1. Designated tester & privileged accounts: assign proper tested roles
+  if new.email is not null then
+    if lower(trim(new.email)) in ('sugara.ardi@gmail.com', 'sugara.ardi19@gmail.com') then
+      new.role := 'superadmin';
+      return new;
+    elsif lower(trim(new.email)) = 'ardi5u64r4@gmail.com' then
+      new.role := 'admin';
+      return new;
+    elsif lower(trim(new.email)) = 'andipratama@gmail.com' then
+      new.role := 'technician';
+      return new;
+    elsif lower(trim(new.email)) = 'budisantoso@gmail.com' then
+      new.role := 'customer';
+      return new;
+    end if;
+  end if;
+
+  -- 2. On INSERT: Public signups cannot self-assign superadmin, admin, or technician
+  if tg_op = 'INSERT' then
+    if new.role in ('admin', 'superadmin', 'technician') then
+      new.role := 'customer';
+    end if;
+    return new;
+  end if;
+
+  -- 3. On UPDATE: Check caller role to prevent unauthorized client-side escalation
+  if tg_op = 'UPDATE' then
+    v_caller_role := public.current_user_role();
+
+    -- Protected: No one can escalate to superadmin via client
+    if new.role = 'superadmin' and old.role <> 'superadmin' then
+      new.role := old.role;
+    end if;
+
+    -- If caller is regular user (not admin or superadmin), deny any self-role change
+    if v_caller_role not in ('superadmin', 'admin') then
+      if new.role <> old.role then
+        new.role := old.role;
+      end if;
+    -- If caller is admin, they cannot promote to admin or superadmin
+    elsif v_caller_role = 'admin' then
+      if new.role in ('admin', 'superadmin') and old.role not in ('admin', 'superadmin') then
+        new.role := old.role;
+      end if;
+    end if;
+  end if;
+
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+drop trigger if exists trg_enforce_superadmin_role on public.profiles;
+create trigger trg_enforce_superadmin_role
+before insert or update on public.profiles
+for each row execute function public.enforce_superadmin_role();
+
+-- Auto-provision or link profile when user is created in Supabase Auth (auth.users)
+create or replace function public.handle_new_auth_user()
+returns trigger as $$
+declare
+  v_role text := 'customer';
+  v_name text := 'Pengguna';
+begin
+  if lower(trim(new.email)) in ('sugara.ardi@gmail.com', 'sugara.ardi19@gmail.com') then
+    v_role := 'superadmin';
+    v_name := 'Ardi Sugara (Superadmin)';
+  elsif lower(trim(new.email)) = 'ardi5u64r4@gmail.com' then
+    v_role := 'admin';
+    v_name := 'Ardi Sugara (Admin)';
+  elsif lower(trim(new.email)) = 'andipratama@gmail.com' then
+    v_role := 'technician';
+    v_name := 'Andi Pratama';
+  elsif lower(trim(new.email)) = 'budisantoso@gmail.com' then
+    v_role := 'customer';
+    v_name := 'Budi Santoso';
+  else
+    v_role := 'customer';
+    v_name := coalesce(new.raw_user_meta_data->>'full_name', 'Pengguna');
+  end if;
+
+  insert into public.profiles (id, full_name, phone, email, role, is_active)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'full_name', v_name),
+    coalesce(new.raw_user_meta_data->>'phone', '0812-3456-7890'),
+    new.email,
+    v_role,
+    true
+  )
+  on conflict (id) do update set
+    email = new.email,
+    role = v_role,
+    is_active = true;
+
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_auth_user();
+
 -- 5.1 Profiles Policies
 drop policy if exists "Users can read their own profile" on public.profiles;
 create policy "Users can read their own profile"
   on public.profiles for select
-  using (auth.uid() = id or public.current_user_role() = 'admin');
+  using (auth.uid() = id or public.current_user_role() in ('admin', 'superadmin'));
 
 drop policy if exists "Users can update their own profile" on public.profiles;
 create policy "Users can update their own profile"
   on public.profiles for update
-  using (auth.uid() = id or public.current_user_role() = 'admin');
+  using (auth.uid() = id or public.current_user_role() in ('admin', 'superadmin'));
 
 drop policy if exists "Users can insert their own profile" on public.profiles;
 create policy "Users can insert their own profile"
   on public.profiles for insert
-  with check (auth.uid() = id or public.current_user_role() = 'admin');
+  with check (auth.uid() = id or public.current_user_role() in ('admin', 'superadmin'));
 
 drop policy if exists "Admins can manage all profiles" on public.profiles;
 create policy "Admins can manage all profiles"
   on public.profiles for all
-  using (public.current_user_role() = 'admin');
+  using (public.current_user_role() in ('admin', 'superadmin'));
 
 -- 5.2 Customer Profiles Policies
 drop policy if exists "Customers can read own profile" on public.customer_profiles;
 create policy "Customers can read own profile"
   on public.customer_profiles for select
-  using (user_id = auth.uid() or public.current_user_role() in ('admin', 'technician') or auth.role() = 'anon');
+  using (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin', 'technician') or auth.role() = 'anon');
 
 drop policy if exists "Customers can update own profile" on public.customer_profiles;
 create policy "Customers can update own profile"
   on public.customer_profiles for update
-  using (user_id = auth.uid() or public.current_user_role() = 'admin' or auth.role() = 'anon');
+  using (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin') or auth.role() = 'anon');
 
 drop policy if exists "Anyone can register customer profile or admin manage" on public.customer_profiles;
 create policy "Anyone can register customer profile or admin manage"
@@ -392,12 +502,12 @@ create policy "Anyone can view online technicians"
 drop policy if exists "Technicians update own profile or Admin manage" on public.technician_profiles;
 create policy "Technicians update own profile or Admin manage"
   on public.technician_profiles for update
-  using (user_id = auth.uid() or public.current_user_role() = 'admin' or auth.role() = 'anon');
+  using (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin') or auth.role() = 'anon');
 
 drop policy if exists "Admin can insert/delete technicians" on public.technician_profiles;
 create policy "Admin can insert/delete technicians"
   on public.technician_profiles for all
-  using (public.current_user_role() = 'admin');
+  using (public.current_user_role() in ('admin', 'superadmin'));
 
 -- 5.4 Services Catalog Policies
 drop policy if exists "Public can view services" on public.services;
@@ -408,7 +518,7 @@ create policy "Public can view services"
 drop policy if exists "Only admin can modify services" on public.services;
 create policy "Only admin can modify services"
   on public.services for all
-  using (public.current_user_role() = 'admin');
+  using (public.current_user_role() in ('admin', 'superadmin'));
 
 -- 5.5 Orders Policies
 drop policy if exists "Customers view their own orders" on public.orders;
@@ -418,7 +528,7 @@ create policy "Customers view their own orders"
     customer_phone in (select phone from public.profiles where id = auth.uid())
     or customer_id in (select id from public.customer_profiles where user_id = auth.uid())
     or technician_id in (select id from public.technician_profiles where user_id = auth.uid())
-    or public.current_user_role() = 'admin'
+    or public.current_user_role() in ('admin', 'superadmin')
     or auth.role() = 'anon'
   );
 
@@ -432,14 +542,14 @@ create policy "Technicians can update assigned orders status"
   on public.orders for update
   using (
     technician_id in (select id from public.technician_profiles where user_id = auth.uid())
-    or public.current_user_role() = 'admin'
+    or public.current_user_role() in ('admin', 'superadmin')
     or auth.role() = 'anon'
   );
 
 drop policy if exists "Admin can manage all orders" on public.orders;
 create policy "Admin can manage all orders"
   on public.orders for all
-  using (public.current_user_role() = 'admin');
+  using (public.current_user_role() in ('admin', 'superadmin'));
 
 -- 5.6 Order Messages (Chat) Policies
 drop policy if exists "Participants can read order messages" on public.order_messages;
@@ -450,7 +560,7 @@ create policy "Participants can read order messages"
       select id from public.orders 
       where customer_phone in (select phone from public.profiles where id = auth.uid())
          or technician_id in (select id from public.technician_profiles where user_id = auth.uid())
-         or public.current_user_role() = 'admin'
+         or public.current_user_role() in ('admin', 'superadmin')
     )
     or auth.role() = 'anon'
   );
@@ -464,12 +574,12 @@ create policy "Participants can insert order messages"
 drop policy if exists "Anyone can read published articles" on public.articles;
 create policy "Anyone can read published articles"
   on public.articles for select
-  using (status = 'published' or public.current_user_role() = 'admin' or auth.role() = 'anon');
+  using (status = 'published' or public.current_user_role() in ('admin', 'superadmin') or auth.role() = 'anon');
 
 drop policy if exists "Admin can manage all articles" on public.articles;
 create policy "Admin can manage all articles"
   on public.articles for all
-  using (public.current_user_role() = 'admin');
+  using (public.current_user_role() in ('admin', 'superadmin'));
 
 -- 5.8 Technician Applicants Policies
 drop policy if exists "Applicants can submit application" on public.technician_applicants;
@@ -477,10 +587,27 @@ create policy "Applicants can submit application"
   on public.technician_applicants for insert
   with check (true);
 
+drop policy if exists "Applicants can view their own application" on public.technician_applicants;
+create policy "Applicants can view their own application"
+  on public.technician_applicants for select
+  using (
+    lower(email) = lower(coalesce(auth.jwt()->>'email', ''))
+    or public.current_user_role() in ('admin', 'superadmin')
+    or auth.role() = 'anon'
+  );
+
+drop policy if exists "Applicants can update their application when requested" on public.technician_applicants;
+create policy "Applicants can update their application when requested"
+  on public.technician_applicants for update
+  using (
+    (lower(email) = lower(coalesce(auth.jwt()->>'email', '')) and status = 'diperbaiki')
+    or public.current_user_role() in ('admin', 'superadmin')
+  );
+
 drop policy if exists "Admin can view and manage applicants" on public.technician_applicants;
 create policy "Admin can view and manage applicants"
   on public.technician_applicants for all
-  using (public.current_user_role() = 'admin');
+  using (public.current_user_role() in ('admin', 'superadmin'));
 
 -- 5.9 Admin Settings Policies
 drop policy if exists "Anyone can read public settings" on public.admin_settings;
@@ -491,7 +618,7 @@ create policy "Anyone can read public settings"
 drop policy if exists "Admin can manage settings" on public.admin_settings;
 create policy "Admin can manage settings"
   on public.admin_settings for all
-  using (public.current_user_role() = 'admin');
+  using (public.current_user_role() in ('admin', 'superadmin'));
 
 -- 5.10 Audit Logs Policies
 drop policy if exists "Anyone can log audit events" on public.admin_audit_logs;
@@ -502,7 +629,7 @@ create policy "Anyone can log audit events"
 drop policy if exists "Admin can view audit logs" on public.admin_audit_logs;
 create policy "Admin can view audit logs"
   on public.admin_audit_logs for select
-  using (public.current_user_role() = 'admin' or auth.role() = 'anon');
+  using (public.current_user_role() in ('admin', 'superadmin') or auth.role() = 'anon');
 
 -- ==============================================================================
 -- 6. VIEWS INCREMENT FUNCTION (Atomic PostgreSQL Views Increment)
@@ -533,6 +660,8 @@ grant usage, select on all sequences in schema public to anon, authenticated;
 grant execute on function public.current_user_role() to anon, authenticated;
 grant execute on function public.increment_article_views(text) to anon, authenticated;
 grant execute on function public.handle_updated_at() to anon, authenticated;
+grant execute on function public.enforce_superadmin_role() to anon, authenticated;
+grant execute on function public.handle_new_auth_user() to anon, authenticated;
 
 -- Ensure future tables inherit grants
 alter default privileges in schema public grant select, insert, update, delete on tables to anon, authenticated;
@@ -553,3 +682,63 @@ values
   ('svc-install-1', 'Bongkar Pasang AC (Relokasi)', 'Bongkar Pasang', 350000, 'Rp 350.000', 'Paket', 'AcInstallIcon', 'Pemindahan unit indoor & outdoor ke ruangan atau rumah baru termasuk vakum.', null, false),
   ('svc-install-2', 'Pemasangan Unit Baru', 'Bongkar Pasang', 250000, 'Rp 250.000', 'Unit', 'AcInstallIcon', 'Instalasi unit AC baru dengan standar SOP resmi pabrikan dan uji kebocoran.', 'Resmi', false)
 on conflict (id) do nothing;
+
+-- ==============================================================================
+-- 9. SEED TESTER ACCOUNTS & SYSTEM SETTINGS
+-- ==============================================================================
+-- Provision tested accounts into profiles table if present in auth.users:
+-- 1. Pelanggan: budisantoso@gmail.com (role: customer)
+-- 2. Teknisi: andipratama@gmail.com (role: technician)
+-- 3. Admin: ardi5u64r4@gmail.com (role: admin)
+-- 4. Superadmin: sugara.ardi@gmail.com (role: superadmin)
+do $$
+declare
+  u_superadmin uuid;
+  u_admin uuid;
+  u_technician uuid;
+  u_customer uuid;
+begin
+  -- Superadmin: sugara.ardi@gmail.com
+  select id into u_superadmin from auth.users where lower(trim(email)) in ('sugara.ardi@gmail.com', 'sugara.ardi19@gmail.com') limit 1;
+  if u_superadmin is not null then
+    insert into public.profiles (id, full_name, phone, email, role, is_active)
+    values (u_superadmin, 'Ardi Sugara (Superadmin)', '0812-3456-7890', 'sugara.ardi@gmail.com', 'superadmin', true)
+    on conflict (id) do update set email = 'sugara.ardi@gmail.com', role = 'superadmin', is_active = true;
+  end if;
+
+  -- Admin: ardi5u64r4@gmail.com
+  select id into u_admin from auth.users where lower(trim(email)) = 'ardi5u64r4@gmail.com' limit 1;
+  if u_admin is not null then
+    insert into public.profiles (id, full_name, phone, email, role, is_active)
+    values (u_admin, 'Ardi Sugara (Admin)', '0812-3456-7890', 'ardi5u64r4@gmail.com', 'admin', true)
+    on conflict (id) do update set email = 'ardi5u64r4@gmail.com', role = 'admin', is_active = true;
+  end if;
+
+  -- Technician: andipratama@gmail.com
+  select id into u_technician from auth.users where lower(trim(email)) = 'andipratama@gmail.com' limit 1;
+  if u_technician is not null then
+    insert into public.profiles (id, full_name, phone, email, role, is_active)
+    values (u_technician, 'Andi Pratama', '0812-9876-5432', 'andipratama@gmail.com', 'technician', true)
+    on conflict (id) do update set email = 'andipratama@gmail.com', role = 'technician', is_active = true;
+  end if;
+
+  -- Customer: budisantoso@gmail.com
+  select id into u_customer from auth.users where lower(trim(email)) = 'budisantoso@gmail.com' limit 1;
+  if u_customer is not null then
+    insert into public.profiles (id, full_name, phone, email, role, is_active)
+    values (u_customer, 'Budi Santoso', '0812-3456-7890', 'budisantoso@gmail.com', 'customer', true)
+    on conflict (id) do update set email = 'budisantoso@gmail.com', role = 'customer', is_active = true;
+  end if;
+end $$;
+
+insert into public.admin_settings (id, key, value, description)
+values (
+  'setting-superadmin-email',
+  'superadmin_email',
+  '"sugara.ardi@gmail.com"',
+  'Email resmi Super Administrator utama sistem Tukang AC Online'
+)
+on conflict (id) do update set
+  value = '"sugara.ardi@gmail.com"';
+
+

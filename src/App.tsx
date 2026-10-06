@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { UserRole, CustomerTab, TechnicianTab, AdminTab, Order, Technician, Article } from './types';
 import { INITIAL_ORDERS, TECHNICIANS } from './data/initialData';
 import { ARTICLES_DATA } from './data/articlesData';
+import { SplashScreen } from './components/SplashScreen';
+import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
 import { CustomerView } from './components/CustomerView';
 import { AdminView } from './components/AdminView';
@@ -14,77 +16,113 @@ import { createBookingOrder } from './services/customerService';
 import { updateAdminOrderStatus, subscribeAdminOrders, logAuditEvent } from './services/adminService';
 import { updateTechnicianOrderStatus, subscribeTechnicians } from './services/technicianService';
 import { subscribeArticles, getAllArticles } from './services/articleService';
-import { getCurrentUserProfile, onAuthStateChange, UserProfile } from './services/authService';
+import { 
+  getCurrentUserProfile, 
+  onAuthStateChange, 
+  signOutUser, 
+  updateUserProfileRole, 
+  UserProfile,
+  isSuperadminEmail,
+  SUPERADMIN_EMAIL
+} from './services/authService';
 
 export default function App() {
-  const [currentRole, setCurrentRole] = useState<UserRole>('customer');
+  // 1. Core Authentication & Screen State (Single Source of Truth)
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [authenticatedProfile, setAuthenticatedProfile] = useState<UserProfile | null>(null);
+  const [currentRole, setCurrentRole] = useState<UserRole | null>(null);
+
+  // 2. Tab Navigation States
   const [customerTab, setCustomerTab] = useState<CustomerTab>('home');
   const [technicianTab, setTechnicianTab] = useState<TechnicianTab>('beranda');
   const [adminTab, setAdminTab] = useState<AdminTab>('orders');
+
+  // 3. Application Data States
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
   const [technicians, setTechnicians] = useState<Technician[]>(TECHNICIANS);
   const [articles, setArticles] = useState<Article[]>(ARTICLES_DATA);
+
+  // 4. Modals and Notifications (Defaulted to false)
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDatabaseInspectorOpen, setIsDatabaseInspectorOpen] = useState(false);
 
-  // Development/Demo Mode Flag:
-  // When an authenticated user is logged in, their role comes directly from profiles.role
-  const isDemoMode = !authenticatedProfile;
+  // Debugging log for state monitoring
+  useEffect(() => {
+    console.log('AUTH & ROUTING STATE:', {
+      isLoading,
+      isAuthenticated,
+      user: authenticatedProfile?.email || null,
+      role: currentRole
+    });
+  }, [isLoading, isAuthenticated, authenticatedProfile, currentRole]);
 
-  // Initialize and synchronize Supabase Realtime backend on startup
+  // Initial Auth Check and Supabase Realtime synchronization
   useEffect(() => {
     let unsubscribeOrders: (() => void) | null = null;
     let unsubscribeTechs: (() => void) | null = null;
     let unsubscribeArticles: (() => void) | null = null;
     let unsubscribeAuth: (() => void) | null = null;
 
-    const setupBackendDatabase = async () => {
+    const bootstrapApplication = async () => {
       try {
-        // Initial auth check
+        // Step 1: Check existing Supabase authentication session
         const profile = await getCurrentUserProfile();
         if (profile) {
           setAuthenticatedProfile(profile);
+          setIsAuthenticated(true);
           setCurrentRole(profile.role);
+        } else {
+          setAuthenticatedProfile(null);
+          setIsAuthenticated(false);
+          setCurrentRole(null);
         }
 
-        // Listen for Supabase Auth state changes
+        // Step 2: Listen for Supabase Auth state changes
         unsubscribeAuth = onAuthStateChange((updatedProfile) => {
-          setAuthenticatedProfile(updatedProfile);
           if (updatedProfile) {
+            setAuthenticatedProfile(updatedProfile);
+            setIsAuthenticated(true);
             setCurrentRole(updatedProfile.role);
+          } else {
+            setAuthenticatedProfile(null);
+            setIsAuthenticated(false);
+            setCurrentRole(null);
           }
         });
 
-        // Initialize Supabase tables if empty
+        // Step 3: Initialize database if empty
         await initializeDatabaseIfEmpty();
 
-        // Subscribe to real-time orders via Supabase Realtime
+        // Step 4: Realtime subscriptions
         unsubscribeOrders = subscribeAdminOrders((liveOrders) => {
           if (liveOrders && liveOrders.length > 0) {
             setOrders(liveOrders);
           }
         });
 
-        // Subscribe to real-time technicians via Supabase Realtime
         unsubscribeTechs = subscribeTechnicians((liveTechs) => {
           if (liveTechs && liveTechs.length > 0) {
             setTechnicians(liveTechs);
           }
         });
 
-        // Subscribe to real-time articles via Supabase Realtime
         unsubscribeArticles = subscribeArticles((liveArticles) => {
           if (liveArticles && liveArticles.length > 0) {
             setArticles(liveArticles);
           }
         });
       } catch (err) {
-        console.warn('Supabase initialization notice:', err);
+        console.warn('Bootstrap initialization notice:', err);
+      } finally {
+        // Brief smooth splash display before presenting single active screen
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 500);
       }
     };
 
-    setupBackendDatabase();
+    bootstrapApplication();
 
     return () => {
       if (unsubscribeOrders) unsubscribeOrders();
@@ -103,7 +141,7 @@ export default function App() {
     }
   };
 
-  // Defensive showToast: never displays undefined, null, or corrupted string templates
+  // Defensive showToast: filters out undefined / corrupted messages
   const showToast = (msg: unknown) => {
     if (!msg || typeof msg !== 'string') return;
     const clean = msg.trim();
@@ -122,12 +160,92 @@ export default function App() {
     }, 3200);
   };
 
+  // Auth Success Handler
+  const handleAuthSuccess = (profile: UserProfile) => {
+    setAuthenticatedProfile(profile);
+    setIsAuthenticated(true);
+    setCurrentRole(profile.role);
+  };
+
+  // Direct URL route inspection & authorization enforcement
+  useEffect(() => {
+    const checkDirectUrlRoute = () => {
+      if (!isAuthenticated || !authenticatedProfile) return;
+
+      const hash = window.location.hash.toLowerCase().replace('#/', '').replace('#', '');
+      const searchParams = new URLSearchParams(window.location.search);
+      const requestedRole = (hash || searchParams.get('role') || searchParams.get('view'))?.toLowerCase();
+
+      if (!requestedRole) return;
+
+      const isSuper = isSuperadminEmail(authenticatedProfile.email) || authenticatedProfile.role === 'superadmin';
+      const isAdm = authenticatedProfile.role === 'admin';
+
+      if (requestedRole === 'superadmin' && !isSuper) {
+        showToast('ACCESS DENIED: Akses ditolak. Hanya Superadmin yang memiliki izin.');
+        try {
+          window.history.replaceState(null, '', window.location.pathname);
+        } catch (_) {}
+        return;
+      }
+
+      if (requestedRole === 'admin' && !isAdm && !isSuper) {
+        showToast('ACCESS DENIED: Akses ditolak. Halaman ini memerlukan hak akses Administrator.');
+        try {
+          window.history.replaceState(null, '', window.location.pathname);
+        } catch (_) {}
+        return;
+      }
+
+      if (requestedRole === 'technician' && authenticatedProfile.role === 'customer') {
+        showToast('ACCESS DENIED: Akses ditolak. Akun Anda belum disetujui sebagai Teknisi.');
+        try {
+          window.history.replaceState(null, '', window.location.pathname);
+        } catch (_) {}
+        return;
+      }
+
+      // Enforce: role strictly follows database profile role
+      if (['customer', 'technician', 'admin', 'superadmin'].includes(requestedRole)) {
+        if (requestedRole !== authenticatedProfile.role && !isSuper) {
+          showToast('ACCESS DENIED: Peran terkunci sesuai profil database Anda.');
+          try {
+            window.history.replaceState(null, '', window.location.pathname);
+          } catch (_) {}
+        }
+      }
+    };
+
+    checkDirectUrlRoute();
+    window.addEventListener('hashchange', checkDirectUrlRoute);
+    return () => window.removeEventListener('hashchange', checkDirectUrlRoute);
+  }, [isAuthenticated, authenticatedProfile]);
+
+  // Full Logout Flow
+  const handleLogout = async () => {
+    try {
+      await signOutUser();
+    } catch (err) {
+      console.warn('Error during sign out:', err);
+    }
+    setAuthenticatedProfile(null);
+    setIsAuthenticated(false);
+    setCurrentRole(null);
+    setCustomerTab('home');
+    setTechnicianTab('beranda');
+    setAdminTab('orders');
+    try {
+      window.history.replaceState(null, '', window.location.pathname);
+    } catch (_) {}
+    showToast('Anda telah berhasil keluar dari akun.');
+  };
+
   const handleAddNewOrder = async (newOrderData: Partial<Order>) => {
     const fullOrder: Order = {
       ...newOrderData,
       id: newOrderData.id || `AC2608${Math.floor(1000 + Math.random() * 9000)}`,
-      customerName: newOrderData.customerName || 'Budi Santoso',
-      customerPhone: newOrderData.customerPhone || '0812-3456-7890',
+      customerName: newOrderData.customerName || (authenticatedProfile?.fullName || 'Budi Santoso'),
+      customerPhone: newOrderData.customerPhone || (authenticatedProfile?.phone || '0812-3456-7890'),
       serviceName: newOrderData.serviceName || 'Cuci AC',
       unitCount: newOrderData.unitCount || 1,
       complaint: newOrderData.complaint || '',
@@ -150,14 +268,18 @@ export default function App() {
     // Persist to Supabase Database
     try {
       await createBookingOrder(fullOrder);
-      await logAuditEvent('CREATE_BOOKING', currentRole, `Order: ${fullOrder.id}`, `Order baru: ${fullOrder.serviceName} (${fullOrder.customerName})`);
+      await logAuditEvent(
+        'CREATE_BOOKING',
+        currentRole || 'customer',
+        `Order: ${fullOrder.id}`,
+        `Order baru: ${fullOrder.serviceName} (${fullOrder.customerName})`
+      );
     } catch (err) {
       console.warn('Could not write order directly to Supabase:', err);
     }
   };
 
   const handleAssignTechnician = async (orderId: string, techName: string) => {
-    // Optimistic UI update
     setOrders((prev) =>
       prev.map((ord) =>
         ord.id === orderId
@@ -173,7 +295,6 @@ export default function App() {
       )
     );
 
-    // Persist to Supabase Orders Table
     try {
       await updateAdminOrderStatus(orderId, 'menuju', techName);
     } catch (err) {
@@ -182,15 +303,18 @@ export default function App() {
   };
 
   const handleUpdateOrderStatus = async (orderId: string, newStatus: Order['status']) => {
-    // Optimistic UI update
     setOrders((prev) =>
       prev.map((ord) => (ord.id === orderId ? { ...ord, status: newStatus } : ord))
     );
 
-    // Persist to Supabase Orders Table
     try {
       await updateTechnicianOrderStatus(orderId, newStatus);
-      await logAuditEvent('UPDATE_STATUS_TECH', 'technician', `Order: ${orderId}`, `Status pengerjaan diubah ke: ${newStatus}`);
+      await logAuditEvent(
+        'UPDATE_STATUS_TECH',
+        'technician',
+        `Order: ${orderId}`,
+        `Status pengerjaan diubah ke: ${newStatus}`
+      );
     } catch (err) {
       console.warn('Could not update technician order status in Supabase:', err);
     }
@@ -200,28 +324,42 @@ export default function App() {
     showToast('Membuka WhatsApp CS Tukang AC Online: +62 812-3456-7890 (Respon Cepat 24 Jam)');
   };
 
+  // ============================================================================
+  // CONDITIONAL RENDERING: SINGLE ACTIVE SCREEN ARCHITECTURE
+  // ============================================================================
+
+  // 1. Initial Loading Screen
+  if (isLoading) {
+    return <SplashScreen />;
+  }
+
+  // 2. Unauthenticated Screen: Only Login & Register
+  if (!isAuthenticated) {
+    return (
+      <>
+        <AuthScreen onLoginSuccess={handleAuthSuccess} onToast={showToast} />
+        <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
+      </>
+    );
+  }
+
+  // 3. Authenticated: Dashboard rendered strictly according to Supabase profile role
+  const activeRole: UserRole = authenticatedProfile?.role || currentRole || 'customer';
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-100/95 to-slate-200/80 text-slate-900 flex flex-col font-['Plus_Jakarta_Sans',sans-serif] relative antialiased selection:bg-sky-500 selection:text-white">
-      {/* Top Navigation Bar with Supabase Database Explorer access for Admin */}
+      {/* Top Navigation Bar with Current Role Info, User Account, and Logout */}
       <Navbar
-        currentRole={currentRole}
-        onRoleChange={(role) => {
-          // If user is authenticated in production, they cannot switch to admin unless their profile.role is admin
-          if (authenticatedProfile && role === 'admin' && authenticatedProfile.role !== 'admin') {
-            showToast('Akses ditolak: Akun Anda tidak memiliki peran Admin');
-            return;
-          }
-          setCurrentRole(role);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        currentRole={activeRole}
+        userProfile={authenticatedProfile}
         onOpenWhatsApp={handleOpenWhatsApp}
         onOpenDatabaseInspector={() => setIsDatabaseInspectorOpen(true)}
-        isDemoMode={isDemoMode}
+        onLogout={handleLogout}
       />
 
-      {/* Main Content Area */}
+      {/* Main Content Area: Strictly renders only the authentic profile role component */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 pb-28 sm:pb-24">
-        {currentRole === 'customer' && (
+        {activeRole === 'customer' && (
           <CustomerView
             activeTab={customerTab}
             setActiveTab={setCustomerTab}
@@ -229,10 +367,21 @@ export default function App() {
             articles={articles}
             onAddNewOrder={handleAddNewOrder}
             onToast={showToast}
+            onLogout={handleLogout}
           />
         )}
 
-        {currentRole === 'admin' && (
+        {activeRole === 'technician' && (
+          <TechnicianView
+            orders={orders}
+            activeTab={technicianTab}
+            setActiveTab={setTechnicianTab}
+            onUpdateOrderStatus={handleUpdateOrderStatus}
+            onToast={showToast}
+          />
+        )}
+
+        {(activeRole === 'admin' || activeRole === 'superadmin') && (
           <AdminView
             orders={orders}
             technicians={technicians}
@@ -245,31 +394,23 @@ export default function App() {
             onToast={showToast}
           />
         )}
-
-        {currentRole === 'technician' && (
-          <TechnicianView
-            orders={orders}
-            activeTab={technicianTab}
-            setActiveTab={setTechnicianTab}
-            onUpdateOrderStatus={handleUpdateOrderStatus}
-            onToast={showToast}
-          />
-        )}
       </main>
 
-      {/* Database Inspector Modal (Restricted to Admin in Navbar) */}
-      <DatabaseInspectorModal
-        isOpen={isDatabaseInspectorOpen}
-        onClose={() => setIsDatabaseInspectorOpen(false)}
-        onToast={showToast}
-      />
+      {/* Database Inspector Modal (Restricted to Admin / Superadmin in Navbar) */}
+      {(activeRole === 'admin' || activeRole === 'superadmin') && (
+        <DatabaseInspectorModal
+          isOpen={isDatabaseInspectorOpen}
+          onClose={() => setIsDatabaseInspectorOpen(false)}
+          onToast={showToast}
+        />
+      )}
 
       {/* Toast Notification */}
       <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
 
-      {/* Bottom Floating Navigation for Mobile & Quick Tabs */}
+      {/* Bottom Floating Navigation: Untuk semua role (Customer, Teknisi, Admin, Superadmin) */}
       <BottomNav
-        currentRole={currentRole}
+        currentRole={activeRole}
         customerTab={customerTab}
         setCustomerTab={(tab) => {
           setCustomerTab(tab);

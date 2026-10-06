@@ -122,7 +122,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             </>
           )}
 
-          {currentRole === 'admin' && (
+          {(currentRole === 'admin' || currentRole === 'superadmin') && (
             <>
               <button
                 onClick={() => {

@@ -240,6 +240,13 @@ export const TechnicianApplicantsSection: React.FC<TechnicianApplicantsSectionPr
             Ditolak
           </span>
         );
+      case 'diperbaiki':
+        return (
+          <span className="inline-flex items-center gap-1 text-[11px] font-black px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 border border-blue-300 shadow-2xs">
+            <AlertCircle className="w-3.5 h-3.5 text-blue-600" />
+            Perlu Perbaikan
+          </span>
+        );
       case 'pending':
       default:
         return (
@@ -515,6 +522,20 @@ export const TechnicianApplicantsSection: React.FC<TechnicianApplicantsSectionPr
                     >
                       <UserCheck className="w-3.5 h-3.5" />
                       <span>Terima</span>
+                    </button>
+                  )}
+
+                  {applicant.status !== 'diperbaiki' && (
+                    <button
+                      onClick={() => {
+                        onUpdateApplicantStatus(applicant.id, 'diperbaiki');
+                        onToast(`Status pelamar ${applicant.name} diubah ke PERLU PERBAIKAN.`);
+                      }}
+                      title="Minta Perbaikan Berkas"
+                      className="inline-flex items-center gap-1 px-2 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                    >
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>Revisi</span>
                     </button>
                   )}
 
@@ -1044,6 +1065,21 @@ export const TechnicianApplicantsSection: React.FC<TechnicianApplicantsSectionPr
                     }`}
                   >
                     ✓ Diterima (Lolos)
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      onUpdateApplicantStatus(selectedApplicant.id, 'diperbaiki');
+                      setSelectedApplicant({ ...selectedApplicant, status: 'diperbaiki' });
+                      onToast(`Status ${selectedApplicant.name} diubah menjadi PERLU PERBAIKAN.`);
+                    }}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                      selectedApplicant.status === 'diperbaiki'
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : 'bg-blue-50 text-blue-800 hover:bg-blue-100 border border-blue-300'
+                    }`}
+                  >
+                    📝 Minta Perbaikan
                   </button>
 
                   <button

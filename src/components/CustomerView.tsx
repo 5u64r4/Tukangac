@@ -56,7 +56,8 @@ import {
   Lock,
   ReceiptText,
   LocateFixed,
-  Radio
+  Radio,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { FloatingSocialProof } from './FloatingSocialProof';
@@ -92,6 +93,7 @@ interface CustomerViewProps {
   articles?: Article[];
   onAddNewOrder: (newOrder: Partial<Order>) => void;
   onToast: (msg: string) => void;
+  onLogout?: () => void;
 }
 
 export const CustomerView: React.FC<CustomerViewProps> = ({
@@ -100,7 +102,8 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
   orders = [],
   articles,
   onAddNewOrder,
-  onToast
+  onToast,
+  onLogout
 }) => {
   // Booking Form State
   const [selectedService, setSelectedService] = useState<string>('Cuci AC');
@@ -1871,6 +1874,9 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             <div className="space-y-1.5 min-w-0 flex-1 flex flex-col justify-between py-0.5">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base sm:text-lg font-black text-slate-900 leading-none">{customerName}</h3>
+                <span className="inline-flex items-center gap-1 text-[10px] font-black text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full border border-sky-300 shadow-2xs">
+                  Pelanggan
+                </span>
                 <span className="inline-flex items-center gap-1 text-[10px] font-black text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300 shadow-2xs">
                   ⭐ Member Gold
                 </span>
@@ -1991,6 +1997,35 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-amber-600 group-hover:translate-x-0.5 transition-all shrink-0" />
               </div>
             </div>
+
+            {/* Keluar dari Akun (Logout) */}
+            {onLogout && (
+              <div 
+                onClick={() => {
+                  if (window.confirm('Apakah Anda yakin ingin keluar dari akun?')) {
+                    onLogout();
+                  }
+                }}
+                className="p-4 sm:p-5 rounded-2xl bg-white border border-rose-200/90 shadow-xs hover:shadow-md hover:border-rose-400 hover:bg-rose-50/30 transition-all flex items-center justify-between gap-4 cursor-pointer group active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 border border-rose-100 flex items-center justify-center font-bold shrink-0 shadow-xs group-hover:scale-105 group-hover:bg-rose-100/80 transition-all">
+                    <LogOut className="w-7 h-7" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <h4 className="text-sm sm:text-base font-extrabold text-rose-700 group-hover:text-rose-800 transition-colors">
+                      Keluar dari Akun
+                    </h4>
+                    <p className="text-xs text-rose-500/80 font-medium">
+                      Akhiri sesi login dan kembali ke layar masuk
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <ChevronRight className="w-5 h-5 text-rose-400 group-hover:text-rose-600 group-hover:translate-x-0.5 transition-all shrink-0" />
+                </div>
+              </div>
+            )}
           </div>
         </motion.div>
       )}

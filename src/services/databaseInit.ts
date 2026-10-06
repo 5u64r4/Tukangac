@@ -9,7 +9,7 @@ const INITIAL_CUSTOMERS: CustomerRecord[] = [
     id: 'CUST-081234567890',
     name: 'Budi Santoso',
     phone: '0812-3456-7890',
-    email: 'budi.santoso@gmail.com',
+    email: 'budisantoso@gmail.com',
     defaultAddress: 'Jl. Boulevard Raya Blok A4 No. 12, Bekasi Selatan',
     addressLabel: 'Rumah',
     totalOrders: 3,
@@ -89,12 +89,52 @@ const INITIAL_LOGS: AdminAuditLog[] = [
   }
 ];
 
+const TESTER_PROFILES = [
+  {
+    id: 'usr_tester_budi',
+    email: 'budisantoso@gmail.com',
+    full_name: 'Budi Santoso',
+    phone: '0812-3456-7890',
+    role: 'customer',
+    is_active: true
+  },
+  {
+    id: 'usr_tester_andi',
+    email: 'andipratama@gmail.com',
+    full_name: 'Andi Pratama',
+    phone: '0812-9876-5432',
+    role: 'technician',
+    is_active: true
+  },
+  {
+    id: 'usr_tester_ardi_admin',
+    email: 'ardi5u64r4@gmail.com',
+    full_name: 'Ardi Sugara (Admin)',
+    phone: '0812-3456-7890',
+    role: 'admin',
+    is_active: true
+  },
+  {
+    id: 'usr_tester_sugara_superadmin',
+    email: 'sugara.ardi@gmail.com',
+    full_name: 'Ardi Sugara (Superadmin)',
+    phone: '0812-3456-7890',
+    role: 'superadmin',
+    is_active: true
+  }
+];
+
 /**
  * Inisialisasi awal database Supabase hanya jika database benar-benar kosong.
  * TIDAK menulis ulang data jika sudah ada isi.
  */
 export async function initializeDatabaseIfEmpty(): Promise<{ seeded: boolean; message: string }> {
   try {
+    // 0. Always ensure tester profiles exist in profiles table
+    try {
+      await supabase.from('profiles').upsert(TESTER_PROFILES);
+    } catch (_) {}
+
     const { data: existingOrders } = await supabase.from('orders').select('id').limit(1);
     const { data: existingTechs } = await supabase.from('technician_profiles').select('id').limit(1);
 

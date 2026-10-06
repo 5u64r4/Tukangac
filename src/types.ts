@@ -1,4 +1,4 @@
-export type UserRole = 'customer' | 'admin' | 'technician';
+export type UserRole = 'customer' | 'technician' | 'admin' | 'superadmin';
 
 export type CustomerTab = 
   | 'home'
@@ -217,7 +217,7 @@ export interface Technician {
   isPriorityTechnician?: boolean;
 }
 
-export type ApplicantStatus = 'pending' | 'diterima' | 'ditolak';
+export type ApplicantStatus = 'pending' | 'diterima' | 'ditolak' | 'diperbaiki';
 
 export interface EmergencyContact {
   name: string;
