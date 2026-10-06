@@ -40,6 +40,8 @@ function mapCustomerToRow(customer: CustomerRecord): any {
 export function mapOrderRow(row: any): Order {
   return {
     id: row.id,
+    customerId: row.customer_id || row.customerId || undefined,
+    technicianId: row.technician_id || row.technicianId || undefined,
     customerName: row.customer_name || row.customerName || '',
     customerPhone: row.customer_phone || row.customerPhone || '',
     serviceName: row.service_name || row.serviceName || '',
@@ -76,6 +78,8 @@ export function mapOrderRow(row: any): Order {
 export function mapOrderToRow(order: Order): any {
   return {
     id: order.id,
+    customer_id: order.customerId || null,
+    technician_id: order.technicianId || null,
     customer_name: order.customerName,
     customer_phone: order.customerPhone,
     service_name: order.serviceName,
@@ -250,17 +254,27 @@ export async function createBookingOrder(orderData: Order): Promise<string> {
 /**
  * Real-time listener pesanan untuk customer via Supabase Realtime
  */
-export function subscribeCustomerOrders(phone: string, callback: (orders: Order[]) => void): () => void {
+export function subscribeCustomerOrders(
+  userId?: string,
+  phone?: string,
+  callback?: (orders: Order[]) => void
+): () => void {
+  if (!callback) return () => {};
+
+  if (!userId && !phone) {
+    callback([]);
+    return () => {};
+  }
+
   // 1. Fetch initial orders
-  getOrdersByCustomerPhone(phone).then(initialOrders => {
-    if (initialOrders.length > 0) {
-      callback(initialOrders);
-    }
+  getOrdersForCustomer(userId, phone).then(initialOrders => {
+    callback(initialOrders);
   });
 
   // 2. Realtime subscription on orders table
+  const channelKey = userId || phone || 'customer_orders';
   const channel = supabase
-    .channel(`customer_orders_${phone}`)
+    .channel(`customer_orders_${channelKey}`)
     .on(
       'postgres_changes',
       {
@@ -270,7 +284,7 @@ export function subscribeCustomerOrders(phone: string, callback: (orders: Order[
       },
       () => {
         // Refresh customer orders when table changes
-        getOrdersByCustomerPhone(phone).then(callback);
+        getOrdersForCustomer(userId, phone).then(callback);
       }
     )
     .subscribe();

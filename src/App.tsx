@@ -12,9 +12,9 @@ import { BottomNav } from './components/BottomNav';
 import { Toast } from './components/Toast';
 import { DatabaseInspectorModal } from './components/DatabaseInspectorModal';
 import { initializeDatabaseIfEmpty } from './services/databaseInit';
-import { createBookingOrder } from './services/customerService';
+import { createBookingOrder, subscribeCustomerOrders } from './services/customerService';
 import { updateAdminOrderStatus, subscribeAdminOrders, logAuditEvent } from './services/adminService';
-import { updateTechnicianOrderStatus, subscribeTechnicians } from './services/technicianService';
+import { updateTechnicianOrderStatus, subscribeTechnicians, subscribeTechnicianOrders } from './services/technicianService';
 import { subscribeArticles, getAllArticles } from './services/articleService';
 import { 
   getCurrentUserProfile, 
@@ -39,7 +39,7 @@ export default function App() {
   const [adminTab, setAdminTab] = useState<AdminTab>('orders');
 
   // 3. Application Data States
-  const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
+  const [orders, setOrders] = useState<Order[]>([]);
   const [technicians, setTechnicians] = useState<Technician[]>(TECHNICIANS);
   const [articles, setArticles] = useState<Article[]>(ARTICLES_DATA);
 
@@ -139,13 +139,7 @@ export default function App() {
         // Step 3: Initialize database if empty
         await initializeDatabaseIfEmpty();
 
-        // Step 4: Realtime subscriptions
-        unsubscribeOrders = subscribeAdminOrders((liveOrders) => {
-          if (liveOrders && liveOrders.length > 0) {
-            setOrders(liveOrders);
-          }
-        });
-
+        // Step 4: Realtime subscriptions (Techs and articles)
         unsubscribeTechs = subscribeTechnicians((liveTechs) => {
           if (liveTechs && liveTechs.length > 0) {
             setTechnicians(liveTechs);
@@ -170,12 +164,55 @@ export default function App() {
     bootstrapApplication();
 
     return () => {
-      if (unsubscribeOrders) unsubscribeOrders();
       if (unsubscribeTechs) unsubscribeTechs();
       if (unsubscribeArticles) unsubscribeArticles();
       if (unsubscribeAuth) unsubscribeAuth();
     };
   }, []);
+
+  // Synchronize orders strictly based on Supabase Auth session and user role
+  useEffect(() => {
+    // If not logged in, user is strictly guest: NEVER load or query private orders
+    if (!isAuthenticated || !authenticatedProfile) {
+      setOrders([]);
+      return;
+    }
+
+    let unsub: (() => void) | null = null;
+    const role = authenticatedProfile.role;
+
+    if (role === 'customer') {
+      unsub = subscribeCustomerOrders(
+        authenticatedProfile.id,
+        authenticatedProfile.phone,
+        (liveOrders) => {
+          setOrders(liveOrders || []);
+        }
+      );
+    } else if (role === 'technician') {
+      unsub = subscribeTechnicianOrders(
+        authenticatedProfile.id,
+        authenticatedProfile.fullName,
+        (liveOrders) => {
+          setOrders(liveOrders || []);
+        }
+      );
+    } else if (role === 'admin' || role === 'superadmin') {
+      unsub = subscribeAdminOrders((liveOrders) => {
+        setOrders(liveOrders || []);
+      });
+    }
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, [
+    isAuthenticated,
+    authenticatedProfile?.id,
+    authenticatedProfile?.role,
+    authenticatedProfile?.phone,
+    authenticatedProfile?.fullName
+  ]);
 
   const handleRefreshArticles = async () => {
     try {
@@ -288,6 +325,7 @@ export default function App() {
     const fullOrder: Order = {
       ...newOrderData,
       id: newOrderData.id || `AC2608${Math.floor(1000 + Math.random() * 9000)}`,
+      customerId: authenticatedProfile?.id || newOrderData.customerId,
       customerName: newOrderData.customerName || (authenticatedProfile?.fullName || 'Pelanggan'),
       customerPhone: newOrderData.customerPhone || (authenticatedProfile?.phone || ''),
       serviceName: newOrderData.serviceName || 'Cuci AC',
@@ -298,12 +336,15 @@ export default function App() {
       date: newOrderData.date || '28 Agu 2026',
       timeSlot: newOrderData.timeSlot || '10:00–12:00',
       totalPrice: newOrderData.totalPrice || 75000,
-      status: newOrderData.status || 'baru',
+      status: 'baru',
       createdAt: newOrderData.createdAt || 'Baru saja'
     };
 
     if (newOrderData.technicianName) {
       fullOrder.technicianName = newOrderData.technicianName;
+    }
+    if (newOrderData.technicianId) {
+      fullOrder.technicianId = newOrderData.technicianId;
     }
 
     // Optimistic UI update
@@ -323,24 +364,29 @@ export default function App() {
     }
   };
 
-  const handleAssignTechnician = async (orderId: string, techName: string) => {
+  const handleAssignTechnician = async (orderId: string, techNameOrId: string) => {
+    const tech = technicians.find((t) => t.id === techNameOrId || t.name === techNameOrId);
+    const resolvedId = tech?.id;
+    const resolvedName = tech?.name || techNameOrId;
+
     setOrders((prev) =>
       prev.map((ord) =>
         ord.id === orderId
           ? {
               ...ord,
-              technicianName: techName,
+              technicianId: resolvedId,
+              technicianName: resolvedName,
               status: 'menuju',
               estimatedArrival: '09:15',
-              technicianRating: 4.9,
-              technicianDistance: '1,8 km'
+              technicianRating: tech?.rating || 4.9,
+              technicianDistance: tech?.distance || '1,8 km'
             }
           : ord
       )
     );
 
     try {
-      await updateAdminOrderStatus(orderId, 'menuju', techName);
+      await updateAdminOrderStatus(orderId, 'menuju', resolvedName, resolvedId);
     } catch (err) {
       console.warn('Could not update order status in Supabase:', err);
     }

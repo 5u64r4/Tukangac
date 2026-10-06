@@ -161,6 +161,8 @@ export interface MidtransTransactionData {
 
 export interface Order {
   id: string;
+  customerId?: string;
+  technicianId?: string;
   customerName: string;
   customerPhone: string;
   serviceName: string;

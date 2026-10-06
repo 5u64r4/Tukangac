@@ -120,15 +120,20 @@ export async function updateTechnicianOnlineStatus(techId: string, isOnline: boo
 }
 
 /**
- * Mengambil daftar tugas service yang ditugaskan ke teknisi tertentu
+ * Mengambil daftar tugas service yang ditugaskan ke teknisi tertentu (berdasarkan ID dan/atau Nama)
  */
-export async function getOrdersForTechnician(technicianName: string): Promise<Order[]> {
+export async function getOrdersForTechnician(technicianIdOrName: string, technicianName?: string): Promise<Order[]> {
   try {
-    const { data, error } = await supabase
-      .from(ORDERS_TABLE)
-      .select('*')
-      .eq('technician_name', technicianName)
-      .order('created_at', { ascending: false });
+    if (!technicianIdOrName && !technicianName) return [];
+
+    let query = supabase.from(ORDERS_TABLE).select('*');
+    if (technicianIdOrName && technicianName) {
+      query = query.or(`technician_id.eq.${technicianIdOrName},technician_name.eq.${technicianName}`);
+    } else if (technicianIdOrName) {
+      query = query.or(`technician_id.eq.${technicianIdOrName},technician_name.eq.${technicianIdOrName}`);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
       console.warn('Error fetching orders for technician:', error);
@@ -137,9 +142,39 @@ export async function getOrdersForTechnician(technicianName: string): Promise<Or
 
     return (data || []).map(mapOrderRow);
   } catch (err) {
-    console.error(`Error fetching orders for technician ${technicianName}:`, err);
+    console.error(`Error fetching orders for technician:`, err);
     return [];
   }
+}
+
+/**
+ * Real-time listener pesanan khusus teknisi yang ditugaskan
+ */
+export function subscribeTechnicianOrders(
+  technicianId: string,
+  technicianName: string,
+  callback: (orders: Order[]) => void
+): () => void {
+  getOrdersForTechnician(technicianId, technicianName).then(callback);
+
+  const channel = supabase
+    .channel(`technician_orders_${technicianId || technicianName}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: ORDERS_TABLE
+      },
+      () => {
+        getOrdersForTechnician(technicianId, technicianName).then(callback);
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel ? supabase.removeChannel(channel) : channel.unsubscribe();
+  };
 }
 
 /**

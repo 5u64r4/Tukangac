@@ -481,17 +481,26 @@ create policy "Admins can manage all profiles"
 drop policy if exists "Customers can read own profile" on public.customer_profiles;
 create policy "Customers can read own profile"
   on public.customer_profiles for select
-  using (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin', 'technician') or auth.role() = 'anon');
+  using (
+    auth.uid() is not null 
+    and (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin', 'technician'))
+  );
 
 drop policy if exists "Customers can update own profile" on public.customer_profiles;
 create policy "Customers can update own profile"
   on public.customer_profiles for update
-  using (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin') or auth.role() = 'anon');
+  using (
+    auth.uid() is not null 
+    and (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin'))
+  );
 
 drop policy if exists "Anyone can register customer profile or admin manage" on public.customer_profiles;
-create policy "Anyone can register customer profile or admin manage"
+create policy "Authenticated users can create customer profile"
   on public.customer_profiles for insert
-  with check (true);
+  with check (
+    auth.uid() is not null 
+    and (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin'))
+  );
 
 -- 5.3 Technician Profiles Policies
 drop policy if exists "Anyone can view online technicians" on public.technician_profiles;
@@ -502,7 +511,10 @@ create policy "Anyone can view online technicians"
 drop policy if exists "Technicians update own profile or Admin manage" on public.technician_profiles;
 create policy "Technicians update own profile or Admin manage"
   on public.technician_profiles for update
-  using (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin') or auth.role() = 'anon');
+  using (
+    auth.uid() is not null 
+    and (user_id = auth.uid() or public.current_user_role() in ('admin', 'superadmin'))
+  );
 
 drop policy if exists "Admin can insert/delete technicians" on public.technician_profiles;
 create policy "Admin can insert/delete technicians"
@@ -520,55 +532,110 @@ create policy "Only admin can modify services"
   on public.services for all
   using (public.current_user_role() in ('admin', 'superadmin'));
 
--- 5.5 Orders Policies
+-- 5.5 Orders Policies (Strict RBAC & Guest Blocking)
 drop policy if exists "Customers view their own orders" on public.orders;
-create policy "Customers view their own orders"
+create policy "Customers and assigned technicians view orders"
   on public.orders for select
   using (
-    customer_phone in (select phone from public.profiles where id = auth.uid())
-    or customer_id in (select id from public.customer_profiles where user_id = auth.uid())
-    or technician_id in (select id from public.technician_profiles where user_id = auth.uid())
-    or public.current_user_role() in ('admin', 'superadmin')
-    or auth.role() = 'anon'
+    auth.uid() is not null
+    and (
+      -- Customer: only their own orders
+      (public.current_user_role() = 'customer' and (
+        customer_id = auth.uid()::text
+        or customer_id in (select id from public.customer_profiles where user_id = auth.uid())
+        or customer_phone in (select phone from public.profiles where id = auth.uid())
+      ))
+      -- Technician: only orders assigned to them
+      or (public.current_user_role() = 'technician' and (
+        technician_id = auth.uid()::text
+        or technician_id in (select id from public.technician_profiles where user_id = auth.uid())
+      ))
+      -- Admin & Superadmin: all orders
+      or public.current_user_role() in ('admin', 'superadmin')
+    )
   );
 
 drop policy if exists "Customers can create new orders" on public.orders;
-create policy "Customers can create new orders"
+create policy "Authenticated customers and admins can insert orders"
   on public.orders for insert
-  with check (true);
+  with check (
+    auth.uid() is not null
+    and (
+      (public.current_user_role() = 'customer' and (
+        customer_id = auth.uid()::text
+        or customer_id in (select id from public.customer_profiles where user_id = auth.uid())
+        or customer_phone in (select phone from public.profiles where id = auth.uid())
+      ))
+      or public.current_user_role() in ('admin', 'superadmin')
+    )
+  );
 
 drop policy if exists "Technicians can update assigned orders status" on public.orders;
-create policy "Technicians can update assigned orders status"
+create policy "Role-based order updates"
   on public.orders for update
   using (
-    technician_id in (select id from public.technician_profiles where user_id = auth.uid())
-    or public.current_user_role() in ('admin', 'superadmin')
-    or auth.role() = 'anon'
+    auth.uid() is not null
+    and (
+      -- Customer updating own order (e.g. payment settlement, complaint)
+      (public.current_user_role() = 'customer' and (
+        customer_id = auth.uid()::text
+        or customer_id in (select id from public.customer_profiles where user_id = auth.uid())
+        or customer_phone in (select phone from public.profiles where id = auth.uid())
+      ))
+      -- Technician: only assigned orders
+      or (public.current_user_role() = 'technician' and (
+        technician_id = auth.uid()::text
+        or technician_id in (select id from public.technician_profiles where user_id = auth.uid())
+      ))
+      -- Admin & Superadmin: all
+      or public.current_user_role() in ('admin', 'superadmin')
+    )
   );
 
 drop policy if exists "Admin can manage all orders" on public.orders;
-create policy "Admin can manage all orders"
-  on public.orders for all
-  using (public.current_user_role() in ('admin', 'superadmin'));
+create policy "Only superadmin and admin can delete orders"
+  on public.orders for delete
+  using (
+    auth.uid() is not null
+    and public.current_user_role() in ('admin', 'superadmin')
+  );
 
 -- 5.6 Order Messages (Chat) Policies
 drop policy if exists "Participants can read order messages" on public.order_messages;
 create policy "Participants can read order messages"
   on public.order_messages for select
   using (
-    order_id in (
-      select id from public.orders 
-      where customer_phone in (select phone from public.profiles where id = auth.uid())
-         or technician_id in (select id from public.technician_profiles where user_id = auth.uid())
-         or public.current_user_role() in ('admin', 'superadmin')
+    auth.uid() is not null
+    and (
+      order_id in (
+        select id from public.orders 
+        where (customer_id = auth.uid()::text
+               or customer_id in (select id from public.customer_profiles where user_id = auth.uid())
+               or customer_phone in (select phone from public.profiles where id = auth.uid()))
+           or (technician_id = auth.uid()::text
+               or technician_id in (select id from public.technician_profiles where user_id = auth.uid()))
+           or public.current_user_role() in ('admin', 'superadmin')
+      )
     )
-    or auth.role() = 'anon'
   );
 
 drop policy if exists "Participants can insert order messages" on public.order_messages;
 create policy "Participants can insert order messages"
   on public.order_messages for insert
-  with check (true);
+  with check (
+    auth.uid() is not null
+    and (
+      order_id in (
+        select id from public.orders 
+        where (customer_id = auth.uid()::text
+               or customer_id in (select id from public.customer_profiles where user_id = auth.uid())
+               or customer_phone in (select phone from public.profiles where id = auth.uid()))
+           or (technician_id = auth.uid()::text
+               or technician_id in (select id from public.technician_profiles where user_id = auth.uid()))
+           or public.current_user_role() in ('admin', 'superadmin')
+      )
+    )
+  );
 
 -- 5.7 Articles Policies
 drop policy if exists "Anyone can read published articles" on public.articles;

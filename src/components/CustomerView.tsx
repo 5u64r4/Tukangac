@@ -165,7 +165,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
   const handleCompleteBooking = () => {
     if (!isAuthenticated) {
-      onToast('Silakan masuk atau daftar akun terlebih dahulu untuk menyelesaikan pesanan.');
+      onToast('Silakan masuk terlebih dahulu. Untuk membuat pesanan, Anda harus memiliki akun Tukang AC Online.');
       if (onOpenAuth) onOpenAuth();
       return;
     }
@@ -177,6 +177,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
     const newOrder: Order = {
       id: newId,
+      customerId: userProfile?.id,
       customerName: userProfile?.fullName || 'Pelanggan',
       customerPhone: userProfile?.phone || '',
       serviceName: `${selectedService} × ${unitCount}`,
@@ -860,25 +861,26 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
           </div>
 
           {!isAuthenticated && (
-            <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between gap-3 shadow-xs">
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-8 h-8 rounded-xl bg-amber-200/60 text-amber-800 flex items-center justify-center shrink-0">
                   <Info className="w-4.5 h-4.5" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs sm:text-sm font-black text-amber-950">
-                    Akses Tamu (Belum Login)
+                    Silakan masuk terlebih dahulu
                   </p>
                   <p className="text-[11px] text-amber-800 font-medium">
-                    Masuk ke akun Anda untuk menyimpan riwayat pesanan otomatis dan mendapatkan garansi servis resmi.
+                    Untuk membuat pesanan, Anda harus memiliki akun Tukang AC Online.
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => onOpenAuth?.()}
-                className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-extrabold text-xs shrink-0 cursor-pointer shadow-xs transition-all"
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-extrabold text-xs shrink-0 cursor-pointer shadow-xs transition-all flex items-center justify-center gap-1.5"
               >
-                Masuk / Daftar
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Masuk / Daftar</span>
               </button>
             </div>
           )}
@@ -1462,13 +1464,44 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
               </div>
             </div>
 
+            {!isAuthenticated && (
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-amber-200/60 text-amber-800 flex items-center justify-center shrink-0">
+                    <Info className="w-4.5 h-4.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-black text-amber-950">
+                      Silakan masuk terlebih dahulu
+                    </p>
+                    <p className="text-[11px] text-amber-800 font-medium">
+                      Untuk membuat pesanan, Anda harus memiliki akun Tukang AC Online.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => onOpenAuth?.()}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-extrabold text-xs shrink-0 cursor-pointer shadow-xs transition-all flex items-center justify-center gap-1.5"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Masuk / Daftar</span>
+                </button>
+              </div>
+            )}
+
             <div className="pt-2">
               <button
                 onClick={handleCompleteBooking}
                 className="w-full py-3.5 rounded-xl bg-gradient-to-r from-sky-600 to-blue-700 hover:from-sky-500 hover:to-blue-600 active:scale-98 text-white font-extrabold text-sm shadow-lg shadow-sky-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all"
               >
-                <Check className="w-5 h-5" />
-                <span>{selectedPaymentMethod === 'midtrans' ? 'LANJUT KE MIDTRANS SNAP' : 'KONFIRMASI BOOKING (COD)'}</span>
+                {!isAuthenticated ? <LogIn className="w-5 h-5" /> : <Check className="w-5 h-5" />}
+                <span>
+                  {!isAuthenticated
+                    ? 'MASUK / DAFTAR UNTUK BUAT PESANAN'
+                    : selectedPaymentMethod === 'midtrans'
+                    ? 'LANJUT KE MIDTRANS SNAP'
+                    : 'KONFIRMASI BOOKING (COD)'}
+                </span>
               </button>
             </div>
           </div>
@@ -1573,10 +1606,10 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 Login Diperlukan
               </span>
               <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mb-2">
-                Lacak Status Teknisi
+                Masuk untuk menggunakan Tracking
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed mb-6">
-                Fitur pelacakan teknisi secara langsung (Live Tracking), estimasi kedatangan, dan komunikasi dengan teknisi hanya dapat diakses melalui pesanan aktif pada akun yang telah masuk.
+                Tracking pesanan hanya tersedia setelah Anda masuk ke akun.
               </p>
               <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
                 <button
@@ -1584,7 +1617,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                   className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-xs sm:text-sm shadow-md shadow-sky-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <LogIn className="w-4 h-4" />
-                  <span>Masuk / Daftar Akun</span>
+                  <span>Masuk / Daftar</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('home')}
@@ -1832,10 +1865,10 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 Login Diperlukan
               </span>
               <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mb-2">
-                Riwayat Pesanan Pelanggan
+                Masuk untuk melihat pesanan
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed mb-6">
-                Silakan masuk ke akun Anda untuk melihat daftar pesanan, riwayat servis AC, status pengerjaan, dan invoice resmi pembayaran Anda.
+                Silakan masuk atau daftar akun untuk melihat riwayat pesanan Anda.
               </p>
               <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
                 <button
@@ -1843,7 +1876,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                   className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-xs sm:text-sm shadow-md shadow-sky-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <LogIn className="w-4 h-4" />
-                  <span>Masuk / Daftar Akun</span>
+                  <span>Masuk / Daftar</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('home')}
@@ -2014,10 +2047,10 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                 Login Diperlukan
               </span>
               <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mb-2">
-                Profil Akun Pelanggan
+                Anda belum masuk
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed mb-6">
-                Masuk ke akun Anda untuk melihat informasi kontak terdaftar, status keanggotaan, alamat tersimpan, dan voucher promo servis Anda.
+                Masuk atau daftar akun untuk mengakses profil Anda.
               </p>
               <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
                 <button
@@ -2025,7 +2058,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                   className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-xs sm:text-sm shadow-md shadow-sky-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <LogIn className="w-4 h-4" />
-                  <span>Masuk / Daftar Akun</span>
+                  <span>Masuk / Daftar</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('home')}

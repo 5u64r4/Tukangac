@@ -137,7 +137,8 @@ export async function getAllOrders(): Promise<Order[]> {
 export async function updateAdminOrderStatus(
   orderId: string, 
   status: OrderStatus, 
-  technicianName?: string
+  technicianName?: string,
+  technicianId?: string
 ): Promise<void> {
   try {
     const updatePayload: any = {
@@ -146,6 +147,9 @@ export async function updateAdminOrderStatus(
     };
     if (technicianName) {
       updatePayload.technician_name = technicianName;
+    }
+    if (technicianId) {
+      updatePayload.technician_id = technicianId;
     }
 
     const { error } = await supabase
