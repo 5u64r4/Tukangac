@@ -49,12 +49,12 @@ export const OrderChatModal: React.FC<OrderChatModalProps> = ({
 
   const senderRole: ChatSenderRole = currentRole === 'technician' ? 'technician' : 'customer';
   const senderName = currentRole === 'technician' 
-    ? (order.technicianName || 'Andi Pratama (Teknisi)') 
-    : (order.customerName || 'Budi Santoso (Pelanggan)');
+    ? (order.technicianName || 'Teknisi') 
+    : (order.customerName || 'Pelanggan');
 
   const recipientName = currentRole === 'technician'
     ? (order.customerName || 'Pelanggan')
-    : (order.technicianName || 'Teknisi Andi');
+    : (order.technicianName || 'Teknisi');
 
   const recipientAvatar = currentRole === 'technician'
     ? null
@@ -69,8 +69,8 @@ export const OrderChatModal: React.FC<OrderChatModalProps> = ({
     // Seed initial message if order chat is empty
     seedInitialOrderChatIfEmpty(
       order.id,
-      order.customerName || 'Budi Santoso',
-      order.technicianName || 'Andi Pratama'
+      order.customerName || 'Pelanggan',
+      order.technicianName || 'Teknisi'
     );
 
     // Subscribe to real-time Supabase message stream

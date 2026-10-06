@@ -168,8 +168,8 @@ export async function sendOrderMessage(
  */
 export async function seedInitialOrderChatIfEmpty(
   orderId: string,
-  customerName: string = 'Budi Santoso',
-  technicianName: string = 'Andi Pratama'
+  customerName: string = 'Pelanggan',
+  technicianName: string = 'Teknisi'
 ): Promise<void> {
   try {
     const existing = await getOrderMessages(orderId);

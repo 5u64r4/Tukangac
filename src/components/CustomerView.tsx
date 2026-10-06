@@ -57,7 +57,8 @@ import {
   ReceiptText,
   LocateFixed,
   Radio,
-  LogOut
+  LogOut,
+  LogIn
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { FloatingSocialProof } from './FloatingSocialProof';
@@ -75,6 +76,7 @@ import { MidtransCheckoutModal } from './MidtransCheckoutModal';
 import { Article } from '../data/articlesData';
 import { updateOrderPayment } from '../services/customerService';
 import { logAuditEvent } from '../services/adminService';
+import { UserProfile } from '../services/authService';
 import { 
   getSavedCustomerLocation, 
   saveCustomerLocation, 
@@ -94,6 +96,9 @@ interface CustomerViewProps {
   onAddNewOrder: (newOrder: Partial<Order>) => void;
   onToast: (msg: string) => void;
   onLogout?: () => void;
+  isAuthenticated?: boolean;
+  onOpenAuth?: () => void;
+  userProfile?: UserProfile | null;
 }
 
 export const CustomerView: React.FC<CustomerViewProps> = ({
@@ -103,7 +108,10 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
   articles,
   onAddNewOrder,
   onToast,
-  onLogout
+  onLogout,
+  isAuthenticated = false,
+  onOpenAuth,
+  userProfile
 }) => {
   // Booking Form State
   const [selectedService, setSelectedService] = useState<string>('Cuci AC');
@@ -125,8 +133,8 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
   const [customerPhotoUrl, setCustomerPhotoUrl] = useState<string>('');
   const [isMidtransModalOpen, setIsMidtransModalOpen] = useState<boolean>(false);
   const [checkoutTargetOrder, setCheckoutTargetOrder] = useState<Order | null>(null);
-  const customerName = 'Budi Santoso';
-  const customerInitials = customerName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'B';
+  const customerName = userProfile?.fullName || (isAuthenticated ? 'Pengguna' : 'Tamu');
+  const customerInitials = customerName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'P';
 
   const handleCustomerPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -156,6 +164,12 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
   };
 
   const handleCompleteBooking = () => {
+    if (!isAuthenticated) {
+      onToast('Silakan masuk atau daftar akun terlebih dahulu untuk menyelesaikan pesanan.');
+      if (onOpenAuth) onOpenAuth();
+      return;
+    }
+
     const newId = `AC2608${Math.floor(1000 + Math.random() * 9000)}`;
     const now = new Date();
     const invoiceNo = `INV/${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}/${newId}`;
@@ -163,8 +177,8 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
     const newOrder: Order = {
       id: newId,
-      customerName: 'Budi Santoso',
-      customerPhone: '0812-3456-7890',
+      customerName: userProfile?.fullName || 'Pelanggan',
+      customerPhone: userProfile?.phone || '',
       serviceName: `${selectedService} × ${unitCount}`,
       unitCount,
       complaint: complaint || 'Pengecekan dan pembersihan rutin',
@@ -230,9 +244,11 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
     setIsMidtransModalOpen(true);
   };
 
-  const activeOrder = (selectedTrackingOrderId ? orders.find(o => o.id === selectedTrackingOrderId) : null) || 
+  const activeOrder = isAuthenticated ? (
+    (selectedTrackingOrderId ? orders.find(o => o.id === selectedTrackingOrderId) : null) || 
     orders.find(o => o.status === 'menuju' || o.status === 'baru' || o.status === 'service') || 
-    orders[0];
+    (orders.length > 0 ? orders[0] : null)
+  ) : null;
 
   const getServiceIcon = (iconName: string, customClass: string = 'w-6 h-6 text-sky-600 group-hover:text-white transition-colors') => {
     switch (iconName) {
@@ -842,6 +858,30 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
               Batal
             </button>
           </div>
+
+          {!isAuthenticated && (
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-amber-200/60 text-amber-800 flex items-center justify-center shrink-0">
+                  <Info className="w-4.5 h-4.5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-black text-amber-950">
+                    Akses Tamu (Belum Login)
+                  </p>
+                  <p className="text-[11px] text-amber-800 font-medium">
+                    Masuk ke akun Anda untuk menyimpan riwayat pesanan otomatis dan mendapatkan garansi servis resmi.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => onOpenAuth?.()}
+                className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-extrabold text-xs shrink-0 cursor-pointer shadow-xs transition-all"
+              >
+                Masuk / Daftar
+              </button>
+            </div>
+          )}
 
           {/* Stepper Indicator */}
           <div className="flex items-center justify-between px-2 py-3 bg-white rounded-xl border border-slate-200">
@@ -1519,11 +1559,73 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
       {/* ===================== TAB: LIVE TRACKING ===================== */}
       {activeTab === 'tracking' && (
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="space-y-4 max-w-2xl mx-auto"
-        >
+        !isAuthenticated ? (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4 max-w-xl mx-auto py-8 text-center"
+          >
+            <div className="p-8 sm:p-10 rounded-3xl bg-white border border-slate-200/90 shadow-lg shadow-slate-200/50 flex flex-col items-center">
+              <div className="w-16 h-16 rounded-2xl bg-teal-50 border border-teal-100 text-teal-600 flex items-center justify-center mb-4 shadow-sm">
+                <Navigation className="w-8 h-8" />
+              </div>
+              <span className="text-[11px] font-black tracking-wider uppercase text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 mb-3">
+                Login Diperlukan
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mb-2">
+                Lacak Status Teknisi
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed mb-6">
+                Fitur pelacakan teknisi secara langsung (Live Tracking), estimasi kedatangan, dan komunikasi dengan teknisi hanya dapat diakses melalui pesanan aktif pada akun yang telah masuk.
+              </p>
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                <button
+                  onClick={() => onOpenAuth?.()}
+                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-xs sm:text-sm shadow-md shadow-sky-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Masuk / Daftar Akun</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('home')}
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs sm:text-sm transition-colors cursor-pointer"
+                >
+                  Kembali ke Beranda
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        ) : !activeOrder ? (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4 max-w-xl mx-auto py-8 text-center"
+          >
+            <div className="p-8 sm:p-10 rounded-3xl bg-white border border-slate-200/90 shadow-lg shadow-slate-200/50 flex flex-col items-center">
+              <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-200 text-slate-400 flex items-center justify-center mb-4 shadow-sm">
+                <Navigation className="w-8 h-8" />
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mb-2">
+                Tidak Ada Pesanan Aktif
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed mb-6">
+                Saat ini Anda tidak memiliki pesanan yang sedang berjalan. Lakukan pemesanan servis AC untuk melacak teknisi langsung menuju lokasi Anda.
+              </p>
+              <button
+                onClick={() => setActiveTab('booking')}
+                className="px-6 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs sm:text-sm shadow-md shadow-sky-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Booking Servis Sekarang</span>
+              </button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4 max-w-2xl mx-auto"
+          >
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
@@ -1711,15 +1813,78 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             </div>
           </div>
         </motion.div>
+        )
       )}
 
       {/* ===================== TAB: ORDERS (Riwayat) ===================== */}
       {activeTab === 'orders' && (
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="space-y-4 max-w-2xl mx-auto"
-        >
+        !isAuthenticated ? (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4 max-w-xl mx-auto py-8 text-center"
+          >
+            <div className="p-8 sm:p-10 rounded-3xl bg-white border border-slate-200/90 shadow-lg shadow-slate-200/50 flex flex-col items-center">
+              <div className="w-16 h-16 rounded-2xl bg-sky-50 border border-sky-100 text-sky-600 flex items-center justify-center mb-4 shadow-sm">
+                <Clock className="w-8 h-8" />
+              </div>
+              <span className="text-[11px] font-black tracking-wider uppercase text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 mb-3">
+                Login Diperlukan
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mb-2">
+                Riwayat Pesanan Pelanggan
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed mb-6">
+                Silakan masuk ke akun Anda untuk melihat daftar pesanan, riwayat servis AC, status pengerjaan, dan invoice resmi pembayaran Anda.
+              </p>
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                <button
+                  onClick={() => onOpenAuth?.()}
+                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-xs sm:text-sm shadow-md shadow-sky-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Masuk / Daftar Akun</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('home')}
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs sm:text-sm transition-colors cursor-pointer"
+                >
+                  Kembali ke Beranda
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        ) : orders.length === 0 ? (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4 max-w-xl mx-auto py-8 text-center"
+          >
+            <div className="p-8 sm:p-10 rounded-3xl bg-white border border-slate-200/90 shadow-lg shadow-slate-200/50 flex flex-col items-center">
+              <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-200 text-slate-400 flex items-center justify-center mb-4 shadow-sm">
+                <Clock className="w-8 h-8" />
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mb-2">
+                Belum Ada Riwayat Pesanan
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed mb-6">
+                Anda belum memiliki riwayat pesanan servis AC. Pesan sekarang untuk mendapatkan jaminan udara sejuk dan teknisi profesional bergaransi.
+              </p>
+              <button
+                onClick={() => setActiveTab('booking')}
+                className="px-6 py-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-xs sm:text-sm shadow-md shadow-sky-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Pesan Servis Sekarang</span>
+              </button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="space-y-4 max-w-2xl mx-auto"
+          >
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-extrabold text-slate-900">Pesanan Saya</h2>
             <span className="text-xs text-slate-500 font-medium">{orders.length} total pesanan</span>
@@ -1830,15 +1995,53 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
             ))}
           </div>
         </motion.div>
+        )
       )}
 
       {/* ===================== TAB: PROFILE ===================== */}
       {activeTab === 'profile' && (
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="space-y-4 max-w-2xl mx-auto"
-        >
+        !isAuthenticated ? (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4 max-w-xl mx-auto py-8 text-center"
+          >
+            <div className="p-8 sm:p-10 rounded-3xl bg-white border border-slate-200/90 shadow-lg shadow-slate-200/50 flex flex-col items-center">
+              <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center mb-4 shadow-sm">
+                <User className="w-8 h-8" />
+              </div>
+              <span className="text-[11px] font-black tracking-wider uppercase text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200 mb-3">
+                Login Diperlukan
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mb-2">
+                Profil Akun Pelanggan
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto leading-relaxed mb-6">
+                Masuk ke akun Anda untuk melihat informasi kontak terdaftar, status keanggotaan, alamat tersimpan, dan voucher promo servis Anda.
+              </p>
+              <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                <button
+                  onClick={() => onOpenAuth?.()}
+                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-extrabold text-xs sm:text-sm shadow-md shadow-sky-600/25 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>Masuk / Daftar Akun</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('home')}
+                  className="w-full sm:w-auto px-5 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs sm:text-sm transition-colors cursor-pointer"
+                >
+                  Kembali ke Beranda
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="space-y-4 max-w-2xl mx-auto"
+          >
           <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200 shadow-xs flex items-stretch gap-4">
             {/* Customer Portrait Avatar (Photo or Name Initial B) */}
             <div className="relative group shrink-0 flex items-stretch self-stretch">
@@ -1884,30 +2087,16 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
 
               {/* No Telp Terdaftar with Icon */}
               <div className="flex flex-col gap-1 text-xs text-slate-600 pt-0.5">
-                <a 
-                  href="tel:081234567890"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToast('No Telepon Customer: 0812-3456-7890');
-                  }}
-                  className="flex items-center gap-1.5 font-semibold text-slate-700 hover:text-sky-600 transition-colors cursor-pointer"
-                >
+                <div className="flex items-center gap-1.5 font-semibold text-slate-700">
                   <Phone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  <span>0812-3456-7890</span>
-                </a>
+                  <span>{userProfile?.phone || 'Nomor telepon belum diatur'}</span>
+                </div>
 
                 {/* Email Terdaftar with Icon */}
-                <a 
-                  href="mailto:budi.santoso@gmail.com"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToast('Email Customer: budi.santoso@gmail.com');
-                  }}
-                  className="flex items-center gap-1.5 font-semibold text-slate-700 hover:text-sky-600 transition-colors cursor-pointer truncate"
-                >
+                <div className="flex items-center gap-1.5 font-semibold text-slate-700 truncate">
                   <Mail className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                  <span className="truncate">budi.santoso@gmail.com</span>
-                </a>
+                  <span className="truncate">{userProfile?.email || 'Email belum diatur'}</span>
+                </div>
               </div>
 
               {/* Booking Selesai Badge (Batas Bawah) */}
@@ -1998,8 +2187,8 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
               </div>
             </div>
 
-            {/* Keluar dari Akun (Logout) */}
-            {onLogout && (
+            {/* Keluar dari Akun (Logout jika login, atau Masuk / Daftar jika tamu) */}
+            {isAuthenticated && onLogout ? (
               <div 
                 onClick={() => {
                   if (window.confirm('Apakah Anda yakin ingin keluar dari akun?')) {
@@ -2017,7 +2206,7 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                       Keluar dari Akun
                     </h4>
                     <p className="text-xs text-rose-500/80 font-medium">
-                      Akhiri sesi login dan kembali ke layar masuk
+                      Akhiri sesi login dan kembali ke tampilan publik
                     </p>
                   </div>
                 </div>
@@ -2025,9 +2214,33 @@ export const CustomerView: React.FC<CustomerViewProps> = ({
                   <ChevronRight className="w-5 h-5 text-rose-400 group-hover:text-rose-600 group-hover:translate-x-0.5 transition-all shrink-0" />
                 </div>
               </div>
-            )}
+            ) : onOpenAuth ? (
+              <div 
+                onClick={onOpenAuth}
+                className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-sky-50 to-blue-50 border border-sky-200 shadow-xs hover:shadow-md hover:border-sky-400 transition-all flex items-center justify-between gap-4 cursor-pointer group active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-sky-600 text-white flex items-center justify-center font-bold shrink-0 shadow-md shadow-sky-600/25 group-hover:scale-105 transition-all">
+                    <User className="w-7 h-7" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <h4 className="text-sm sm:text-base font-extrabold text-sky-900 group-hover:text-sky-600 transition-colors">
+                      Masuk / Daftar Akun
+                    </h4>
+                    <p className="text-xs text-sky-700 font-medium">
+                      Masuk dengan email & kata sandi Supabase Anda
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs font-bold text-sky-600">Masuk</span>
+                  <ChevronRight className="w-5 h-5 text-sky-600 group-hover:translate-x-0.5 transition-all shrink-0" />
+                </div>
+              </div>
+            ) : null}
           </div>
         </motion.div>
+        )
       )}
 
       {/* ===================== FULL FLYER LIGHTBOX MODAL ===================== */}

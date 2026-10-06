@@ -12,7 +12,9 @@ import {
   Eye,
   EyeOff,
   Wrench,
-  Shield
+  Shield,
+  ArrowLeft,
+  X
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { signInUser, signUpUser, UserProfile } from '../services/authService';
@@ -20,9 +22,10 @@ import { signInUser, signUpUser, UserProfile } from '../services/authService';
 interface AuthScreenProps {
   onLoginSuccess: (profile: UserProfile) => void;
   onToast: (msg: string) => void;
+  onBackToHome?: () => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess, onToast }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess, onToast, onBackToHome }) => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -106,10 +109,33 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess, onToast 
       {/* Background Decorative Glow */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-sky-500/10 rounded-full blur-3xl pointer-events-none -z-0" />
 
+      {/* Back to Home Button */}
+      {onBackToHome && (
+        <button
+          type="button"
+          onClick={onBackToHome}
+          className="mb-4 flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all border border-white/20 backdrop-blur-md cursor-pointer active:scale-95 z-20"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Kembali ke Halaman Utama (Beranda)</span>
+        </button>
+      )}
+
       {/* Main Authentication Container */}
       <div className="w-full max-w-md bg-white text-slate-900 rounded-3xl shadow-2xl shadow-sky-950/50 border border-slate-200/80 overflow-hidden relative z-10">
         {/* Brand Header */}
         <div className="bg-gradient-to-r from-sky-600 via-sky-500 to-blue-600 p-6 text-white text-center relative overflow-hidden">
+          {onBackToHome && (
+            <button
+              type="button"
+              onClick={onBackToHome}
+              title="Kembali ke Beranda"
+              className="absolute top-4 right-4 p-2 rounded-xl bg-white/10 hover:bg-white/25 text-white transition-all cursor-pointer z-20"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+
           <div className="relative z-10 flex flex-col items-center">
             <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center mb-3 shadow-inner border border-white/30">
               <Snowflake className="w-8 h-8 text-white animate-pulse" />

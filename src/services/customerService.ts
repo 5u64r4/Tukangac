@@ -174,6 +174,36 @@ export async function saveCustomer(customer: CustomerRecord): Promise<void> {
 }
 
 /**
+ * Mengambil daftar pesanan customer berdasarkan ID pengguna / nomor telepon
+ */
+export async function getOrdersForCustomer(userId?: string | null, phone?: string | null): Promise<Order[]> {
+  try {
+    if (!userId && !phone) return [];
+
+    let query = supabase.from(ORDERS_TABLE).select('*');
+    if (userId && phone) {
+      query = query.or(`customer_id.eq.${userId},customer_phone.eq.${phone}`);
+    } else if (userId) {
+      query = query.eq('customer_id', userId);
+    } else if (phone) {
+      query = query.eq('customer_phone', phone);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Error fetching orders for customer:', error);
+      return [];
+    }
+
+    return (data || []).map(mapOrderRow);
+  } catch (err) {
+    console.error('Error fetching orders for customer:', err);
+    return [];
+  }
+}
+
+/**
  * Mengambil daftar pesanan customer berdasarkan nomor telepon
  */
 export async function getOrdersByCustomerPhone(phone: string): Promise<Order[]> {

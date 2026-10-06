@@ -40,12 +40,12 @@ export const InlineOrderChat: React.FC<InlineOrderChatProps> = ({
 
   const senderRole: ChatSenderRole = currentRole;
   const senderName = currentRole === 'technician' 
-    ? (order.technicianName || 'Andi Pratama') 
-    : (order.customerName || 'Budi Santoso');
+    ? (order.technicianName || 'Teknisi') 
+    : (order.customerName || 'Pelanggan');
 
   const interlocutorName = currentRole === 'technician'
-    ? (order.customerName || 'Budi Santoso')
-    : (order.technicianName || 'Andi Pratama');
+    ? (order.customerName || 'Pelanggan')
+    : (order.technicianName || 'Teknisi');
 
   useEffect(() => {
     if (!order?.id) return;
@@ -54,8 +54,8 @@ export const InlineOrderChat: React.FC<InlineOrderChatProps> = ({
     // Seed default messages if empty
     seedInitialOrderChatIfEmpty(
       order.id,
-      order.customerName || 'Budi Santoso',
-      order.technicianName || 'Andi Pratama'
+      order.customerName || 'Pelanggan',
+      order.technicianName || 'Teknisi'
     );
 
     const unsubscribe = subscribeOrderMessages(order.id, (liveMessages) => {

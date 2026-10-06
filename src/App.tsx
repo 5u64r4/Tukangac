@@ -47,6 +47,51 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isDatabaseInspectorOpen, setIsDatabaseInspectorOpen] = useState(false);
 
+  // 5. Explicit Route Architecture:
+  // "/" = Public Home/Landing Page (when unauthenticated) or Role Dashboard (when authenticated)
+  // "/login" = Supabase Auth Login/Register Screen
+  const [currentRoute, setCurrentRoute] = useState<'home' | 'login'>('home');
+
+  // Synchronize route with browser URL on load, popstate, or hashchange
+  useEffect(() => {
+    const syncRouteFromLocation = () => {
+      const pathname = window.location.pathname.toLowerCase();
+      const hash = window.location.hash.toLowerCase().replace('#/', '').replace('#', '');
+      
+      if (pathname === '/login' || hash === 'login') {
+        if (isAuthenticated && authenticatedProfile) {
+          // If already authenticated, never show login; redirect to home
+          setCurrentRoute('home');
+          try {
+            window.history.replaceState(null, '', '/');
+          } catch (_) {}
+        } else {
+          setCurrentRoute('login');
+        }
+      } else {
+        setCurrentRoute('home');
+      }
+    };
+
+    syncRouteFromLocation();
+    window.addEventListener('popstate', syncRouteFromLocation);
+    window.addEventListener('hashchange', syncRouteFromLocation);
+    return () => {
+      window.removeEventListener('popstate', syncRouteFromLocation);
+      window.removeEventListener('hashchange', syncRouteFromLocation);
+    };
+  }, [isAuthenticated, authenticatedProfile]);
+
+  const navigateTo = (route: 'home' | 'login', path: string = '/') => {
+    setCurrentRoute(route);
+    try {
+      if (window.location.pathname !== path) {
+        window.history.pushState(null, '', path);
+      }
+    } catch (_) {}
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Debugging log for state monitoring
   useEffect(() => {
     console.log('AUTH & ROUTING STATE:', {
@@ -160,11 +205,12 @@ export default function App() {
     }, 3200);
   };
 
-  // Auth Success Handler
+  // Auth Success Handler: redirects to root and dashboard role
   const handleAuthSuccess = (profile: UserProfile) => {
     setAuthenticatedProfile(profile);
     setIsAuthenticated(true);
     setCurrentRole(profile.role);
+    navigateTo('home', '/');
   };
 
   // Direct URL route inspection & authorization enforcement
@@ -234,9 +280,7 @@ export default function App() {
     setCustomerTab('home');
     setTechnicianTab('beranda');
     setAdminTab('orders');
-    try {
-      window.history.replaceState(null, '', window.location.pathname);
-    } catch (_) {}
+    navigateTo('home', '/');
     showToast('Anda telah berhasil keluar dari akun.');
   };
 
@@ -244,8 +288,8 @@ export default function App() {
     const fullOrder: Order = {
       ...newOrderData,
       id: newOrderData.id || `AC2608${Math.floor(1000 + Math.random() * 9000)}`,
-      customerName: newOrderData.customerName || (authenticatedProfile?.fullName || 'Budi Santoso'),
-      customerPhone: newOrderData.customerPhone || (authenticatedProfile?.phone || '0812-3456-7890'),
+      customerName: newOrderData.customerName || (authenticatedProfile?.fullName || 'Pelanggan'),
+      customerPhone: newOrderData.customerPhone || (authenticatedProfile?.phone || ''),
       serviceName: newOrderData.serviceName || 'Cuci AC',
       unitCount: newOrderData.unitCount || 1,
       complaint: newOrderData.complaint || '',
@@ -333,45 +377,70 @@ export default function App() {
     return <SplashScreen />;
   }
 
-  // 2. Unauthenticated Screen: Only Login & Register
-  if (!isAuthenticated) {
+  // 2. Explicit Authentication Screen (Only when on /login and unauthenticated)
+  if (currentRoute === 'login' && !isAuthenticated) {
     return (
       <>
-        <AuthScreen onLoginSuccess={handleAuthSuccess} onToast={showToast} />
+        <AuthScreen 
+          onLoginSuccess={handleAuthSuccess} 
+          onToast={showToast} 
+          onBackToHome={() => navigateTo('home', '/')}
+        />
         <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
       </>
     );
   }
 
-  // 3. Authenticated: Dashboard rendered strictly according to Supabase profile role
+  // 3. Main Application (Root "/" = Public Landing Page when unauthenticated, or Role Dashboard when authenticated)
   const activeRole: UserRole = authenticatedProfile?.role || currentRole || 'customer';
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-100/95 to-slate-200/80 text-slate-900 flex flex-col font-['Plus_Jakarta_Sans',sans-serif] relative antialiased selection:bg-sky-500 selection:text-white">
-      {/* Top Navigation Bar with Current Role Info, User Account, and Logout */}
+      {/* Top Navigation Bar with Current Role Info, Hamburger ☰ Menu, and Login Access */}
       <Navbar
         currentRole={activeRole}
         userProfile={authenticatedProfile}
+        isAuthenticated={isAuthenticated}
         onOpenWhatsApp={handleOpenWhatsApp}
         onOpenDatabaseInspector={() => setIsDatabaseInspectorOpen(true)}
         onLogout={handleLogout}
+        onOpenAuth={() => navigateTo('login', '/login')}
+        onNavigateHome={() => {
+          setCustomerTab('home');
+          navigateTo('home', '/');
+        }}
+        onNavigateCustomerTab={(tab) => {
+          setCustomerTab(tab);
+          navigateTo('home', '/');
+        }}
+        onNavigateTechnicianTab={(tab) => {
+          setTechnicianTab(tab);
+          navigateTo('home', '/');
+        }}
+        onNavigateAdminTab={(tab) => {
+          setAdminTab(tab);
+          navigateTo('home', '/');
+        }}
       />
 
-      {/* Main Content Area: Strictly renders only the authentic profile role component */}
+      {/* Main Content Area: Renders CustomerView for public / customer, or TechnicianView / AdminView for role */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 pb-28 sm:pb-24">
-        {activeRole === 'customer' && (
+        {(!isAuthenticated || activeRole === 'customer') && (
           <CustomerView
             activeTab={customerTab}
             setActiveTab={setCustomerTab}
-            orders={orders}
+            orders={isAuthenticated ? orders : []}
             articles={articles}
             onAddNewOrder={handleAddNewOrder}
             onToast={showToast}
             onLogout={handleLogout}
+            isAuthenticated={isAuthenticated}
+            onOpenAuth={() => navigateTo('login', '/login')}
+            userProfile={authenticatedProfile}
           />
         )}
 
-        {activeRole === 'technician' && (
+        {isAuthenticated && activeRole === 'technician' && (
           <TechnicianView
             orders={orders}
             activeTab={technicianTab}
@@ -381,7 +450,7 @@ export default function App() {
           />
         )}
 
-        {(activeRole === 'admin' || activeRole === 'superadmin') && (
+        {isAuthenticated && (activeRole === 'admin' || activeRole === 'superadmin') && (
           <AdminView
             orders={orders}
             technicians={technicians}
@@ -397,7 +466,7 @@ export default function App() {
       </main>
 
       {/* Database Inspector Modal (Restricted to Admin / Superadmin in Navbar) */}
-      {(activeRole === 'admin' || activeRole === 'superadmin') && (
+      {isAuthenticated && (activeRole === 'admin' || activeRole === 'superadmin') && (
         <DatabaseInspectorModal
           isOpen={isDatabaseInspectorOpen}
           onClose={() => setIsDatabaseInspectorOpen(false)}
@@ -408,9 +477,9 @@ export default function App() {
       {/* Toast Notification */}
       <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
 
-      {/* Bottom Floating Navigation: Untuk semua role (Customer, Teknisi, Admin, Superadmin) */}
+      {/* Bottom Floating Navigation: Untuk semua role (Customer / Public, Teknisi, Admin, Superadmin) */}
       <BottomNav
-        currentRole={activeRole}
+        currentRole={isAuthenticated ? activeRole : 'customer'}
         customerTab={customerTab}
         setCustomerTab={(tab) => {
           setCustomerTab(tab);
